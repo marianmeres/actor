@@ -1,0 +1,298 @@
+# @marianmeres/actor - LLM Reference Documentation
+
+## Package Overview
+
+A lightweight, type-safe Actor Model implementation for TypeScript/JavaScript.
+Provides sequential message processing through a mailbox pattern, ensuring
+thread-safe state mutations without locks.
+
+Package: @marianmeres/actor
+Repository: https://github.com/marianmeres/actor
+Runtime: Deno, Node.js, Browser
+Dependencies: @marianmeres/pubsub (for reactive subscriptions)
+
+## Core Concepts
+
+### Actor Model
+- Actors are stateful computation units that communicate via messages
+- Messages are queued in a mailbox and processed sequentially (FIFO)
+- Each message is fully processed before the next begins
+- No race conditions from concurrent updates
+- Handlers can be sync or async
+
+### Message Flow
+1. `send(message)` adds message to mailbox, returns Promise
+2. Mailbox processes messages one at a time
+3. Handler receives (currentState, message), returns response
+4. If reducer provided: newState = reducer(currentState, response)
+5. If state changed (by reference): subscribers are notified
+6. Promise resolves with handler's response
+
+## API Reference
+
+### Types
+
+```typescript
+type MessageHandler<TState, TMessage, TResponse = void> = (
+  state: TState,
+  message: TMessage
+) => TResponse | Promise<TResponse>;
+
+type StateReducer<TState, TResponse> = (
+  state: TState,
+  response: TResponse
+) => TState;
+
+type Subscriber<TState> = (state: TState) => void;
+
+type Unsubscribe = () => void;
+
+interface Actor<TState, TMessage, TResponse = void> {
+  send: (message: TMessage) => Promise<TResponse>;
+  subscribe: (fn: Subscriber<TState>) => Unsubscribe;
+  getState: () => TState;
+  destroy: () => void;
+}
+
+interface ActorOptions<TState, TMessage, TResponse> {
+  initialState: TState;
+  handler: MessageHandler<TState, TMessage, TResponse>;
+  reducer?: StateReducer<TState, TResponse>;
+  onError?: (error: Error, message: TMessage) => void;
+}
+```
+
+### Functions
+
+#### createActor<TState, TMessage, TResponse>(options): Actor
+
+Creates an actor with full control over state updates.
+
+Parameters:
+- options.initialState: TState - Initial state value
+- options.handler: MessageHandler - Processes messages, returns response
+- options.reducer?: StateReducer - Transforms response to new state
+- options.onError?: (error, message) => void - Error callback
+
+Returns: Actor<TState, TMessage, TResponse>
+
+Behavior:
+- Without reducer: state never updates automatically
+- With reducer: state = reducer(state, response) after each message
+- State only updates if reducer returns different reference
+- Subscribers notified only when state reference changes
+
+#### createStateActor<TState, TMessage>(initialState, handler): Actor
+
+Simplified actor where handler directly returns new state.
+
+Parameters:
+- initialState: TState
+- handler: (state, message) => TState | Promise<TState>
+
+Returns: Actor<TState, TMessage, TState>
+
+Equivalent to:
+```typescript
+createActor({
+  initialState,
+  handler,
+  reducer: (_, newState) => newState
+})
+```
+
+#### defineMessage<TType>(type): () => { type: TType }
+#### defineMessage<TType, TPayload>(type): (payload) => { type, payload }
+
+Creates typed message factory functions.
+
+Usage:
+```typescript
+const increment = defineMessage("INCREMENT");
+const add = defineMessage<"ADD", number>("ADD");
+
+actor.send(increment());  // { type: "INCREMENT" }
+actor.send(add(5));       // { type: "ADD", payload: 5 }
+```
+
+### Actor Methods
+
+#### send(message): Promise<TResponse>
+- Queues message for processing
+- Returns promise resolving to handler's response
+- Rejects if handler throws
+- Rejects with "Actor has been destroyed" if destroyed
+
+#### subscribe(fn): Unsubscribe
+- Registers state change callback
+- Calls fn immediately with current state
+- Calls fn on each state change
+- Returns unsubscribe function
+- Subscriber errors are caught and logged (don't break actor)
+
+#### getState(): TState
+- Returns current state synchronously
+- Safe to call anytime, even after destroy
+
+#### destroy(): void
+- Clears mailbox (pending messages discarded)
+- Removes all subscribers
+- Future send() calls will reject
+
+## The Reducer Pattern
+
+The reducer separates handler response from state updates.
+
+### Without Reducer (using createStateActor)
+Handler returns new state directly:
+```typescript
+const counter = createStateActor(0, (state, msg) => state + msg.delta);
+```
+
+### With Reducer
+Handler returns rich data, reducer extracts state:
+```typescript
+const actor = createActor<
+  number,                           // State
+  string,                           // Message
+  { delta: number; log: string }    // Response (different from State!)
+>({
+  initialState: 0,
+  handler: (state, msg) => ({
+    delta: msg.length,
+    log: `Processed: ${msg}`
+  }),
+  reducer: (state, response) => state + response.delta
+});
+
+const result = await actor.send("hello");
+// result = { delta: 5, log: "Processed: hello" }
+// state = 5
+```
+
+Use cases:
+- Handler returns { data, metadata }, state stores only data
+- Handler returns { valid, errors }, state updates only if valid
+- Handler performs side effect, returns status, reducer decides persistence
+
+## Common Patterns
+
+### Discriminated Union Messages
+```typescript
+type Message =
+  | { type: "INCREMENT" }
+  | { type: "DECREMENT" }
+  | { type: "SET"; value: number };
+
+const counter = createStateActor<number, Message>(0, (state, msg) => {
+  switch (msg.type) {
+    case "INCREMENT": return state + 1;
+    case "DECREMENT": return state - 1;
+    case "SET": return msg.value;
+  }
+});
+```
+
+### Async Handler
+```typescript
+const fetcher = createActor<Data, FetchCmd, Data>({
+  initialState: { data: null, loading: false },
+  handler: async (state, msg) => {
+    const res = await fetch(msg.url);
+    return { data: await res.json(), loading: false };
+  },
+  reducer: (_, response) => response
+});
+```
+
+### Form State
+```typescript
+interface FormState {
+  fields: Record<string, { value: string; error: string | null }>;
+  isSubmitting: boolean;
+}
+
+type FormMessage =
+  | { type: "SET_FIELD"; name: string; value: string }
+  | { type: "SUBMIT" }
+  | { type: "SUBMIT_SUCCESS" }
+  | { type: "SUBMIT_ERROR"; error: string };
+```
+
+### Svelte 5 Integration
+```svelte
+<script lang="ts">
+  import { createStateActor } from '@marianmeres/actor';
+  import { onDestroy } from 'svelte';
+
+  const actor = createStateActor(initialState, handler);
+
+  let state = $state(initialState);
+  const unsubscribe = actor.subscribe((s) => { state = s; });
+
+  onDestroy(() => actor.destroy());
+</script>
+```
+
+## Error Handling
+
+### Handler Errors
+- send() promise rejects with the error
+- onError callback is called if provided
+- Mailbox continues processing next message
+- State is not updated on error
+
+### Subscriber Errors
+- Caught and logged to console.error
+- Don't affect other subscribers
+- Don't affect actor operation
+
+## Concurrency Guarantees
+
+- Messages processed strictly in FIFO order
+- Async handlers block mailbox until complete
+- Multiple concurrent send() calls are serialized
+- State updates are atomic (no partial updates)
+
+Example:
+```typescript
+// These execute sequentially, not concurrently
+await Promise.all([
+  actor.send(msg1),  // Completes first
+  actor.send(msg2),  // Waits for msg1
+  actor.send(msg3)   // Waits for msg2
+]);
+```
+
+## Best Practices
+
+### When to Use Actors
+- Complex async workflows needing serialization
+- Shared state with multiple async writers
+- WebSocket/SSE message handling
+- Form submission with validation
+- Background task queues
+- Undo/redo stacks
+
+### When NOT to Use Actors
+- Simple component state (use signals/stores)
+- Synchronous-only state updates
+- Single-writer scenarios
+- High-throughput real-time data (serialization adds latency)
+
+### Message Design
+- Use discriminated unions with `type` field
+- Keep messages immutable
+- Messages should be serializable (for debugging)
+
+### State Design
+- State should be immutable
+- Return new object reference for updates
+- Shallow comparison used for change detection
+
+## Internal Implementation Notes
+
+- Uses @marianmeres/pubsub for subscription management
+- Mailbox is a simple array queue
+- Processing flag prevents concurrent processMailbox calls
+- Destroyed flag prevents new messages and processing

@@ -1,5 +1,8 @@
 # @marianmeres/actor
 
+[![NPM Version](https://img.shields.io/npm/v/@marianmeres/actor)](https://www.npmjs.com/package/@marianmeres/actor)
+[![JSR Version](https://jsr.io/badges/@marianmeres/actor)](https://jsr.io/@marianmeres/actor)
+
 A lightweight, type-safe Actor Model implementation for TypeScript/JavaScript.
 
 ## What is an Actor?
@@ -282,6 +285,10 @@ fetcher.send({ type: "FETCH", url: "/api/data" });
 - Simple component state (use signals/stores instead)
 - Synchronous state updates only
 - Single-writer scenarios
+
+## Full API Documentation
+
+For complete API documentation including all types and detailed parameter descriptions, see [API.md](API.md).
 
 ## License
 

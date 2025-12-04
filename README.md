@@ -389,6 +389,61 @@ await order1.send({ type: "ADD_ITEM", item: { sku: "A", qty: 2 } });
 await order2.send({ type: "ADD_ITEM", item: { sku: "B", qty: 1 } });
 ```
 
+### System State History (Audit Trail)
+
+Track state changes across multiple actors and FSM for debugging, audit, or undo/redo:
+
+```typescript
+// Historian actor - records all state changes across the system
+const historian = createStateActor<
+  { entries: Array<{ ts: number; source: string; state: unknown }> },
+  { type: "RECORD"; source: string; state: unknown } | { type: "CLEAR" }
+>(
+  { entries: [] },
+  (state, msg) => {
+    switch (msg.type) {
+      case "RECORD":
+        return {
+          entries: [...state.entries, { ts: Date.now(), source: msg.source, state: msg.state }]
+        };
+      case "CLEAR":
+        return { entries: [] };
+      default:
+        return state;
+    }
+  }
+);
+
+// Helper to wire up any actor to the historian
+const track = <T>(name: string, actor: { subscribe: (fn: (s: T) => void) => void }) => {
+  actor.subscribe((state) => historian.send({ type: "RECORD", source: name, state }));
+};
+
+// Domain actors
+const cart = createStateActor({ items: [] }, (state, msg) => { /* ... */ });
+const payment = createStateActor({ status: "idle" }, (state, msg) => { /* ... */ });
+
+// Wire them up
+track("cart", cart);
+track("payment", payment);
+
+// Also track FSM transitions
+const checkoutFsm = createFsm({ /* ... */ });
+checkoutFsm.subscribe(({ state }) => {
+  historian.send({ type: "RECORD", source: "checkout-fsm", state });
+});
+
+// Now historian.getState().entries contains full system history:
+// [
+//   { ts: 1701234567890, source: "cart", state: { items: [] } },
+//   { ts: 1701234567891, source: "payment", state: { status: "idle" } },
+//   { ts: 1701234567892, source: "checkout-fsm", state: "IDLE" },
+//   { ts: 1701234567900, source: "cart", state: { items: [{ sku: "A" }] } },
+//   { ts: 1701234567901, source: "checkout-fsm", state: "RESERVING" },
+//   ...
+// ]
+```
+
 ## License
 
 MIT

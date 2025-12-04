@@ -286,6 +286,45 @@ fetcher.send({ type: "FETCH", url: "/api/data" });
 - Synchronous state updates only
 - Single-writer scenarios
 
+## Design Philosophy: Single-Actor Simplicity
+
+This library intentionally implements a **single-actor pattern** without actor addresses,
+hierarchies, or spawning capabilities. This is a deliberate design choice.
+
+### What's NOT included (and why)
+
+In the traditional Actor Model (Erlang/Elixir OTP, Akka), actors have:
+
+- **Addresses** - unique identifiers allowing actors to send messages to each other
+- **Spawning** - actors can create child actors and receive their addresses
+- **Supervision** - parent actors monitor and restart failed children
+
+These features are essential for building distributed, fault-tolerant systems with many
+coordinating actors. However, they add significant complexity.
+
+### What this library provides instead
+
+A focused, lightweight primitive for the most common use case: **serialized message
+processing with encapsulated state**. Each actor is self-contained and handles:
+
+- Sequential (FIFO) message processing via mailbox
+- Thread-safe state mutations without locks
+- Reactive subscriptions for state changes
+- Error isolation within the handler
+
+### When you might need the full Actor Model
+
+If your use case requires actors communicating with each other, building actor hierarchies,
+or distributed fault-tolerance, consider:
+
+- [xstate](https://xstate.js.org/) - State machines with actor spawning
+- [Comlink](https://github.com/GoogleChromeLabs/comlink) - Web Workers as actors
+- A backend runtime like Elixir/Erlang for true distributed actors
+
+For most frontend and simple backend scenarios, this single-actor approach provides the
+core benefits (serialization, isolation, reactivity) without the cognitive overhead of
+a full actor system.
+
 ## Full API Documentation
 
 For complete API documentation including all types and detailed parameter descriptions, see [API.md](API.md).

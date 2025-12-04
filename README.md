@@ -167,7 +167,7 @@ a full actor system.
 
 ## Examples
 
-> Examples below use the amazing [@marianmeres/fsm](https://github.com/marianmeres/fsm) 
+> Some examples below use the amazing [@marianmeres/fsm](https://github.com/marianmeres/fsm) 
 > library. Pure coincidence.
 
 ### Async Data Fetching

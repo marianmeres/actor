@@ -73,6 +73,9 @@ For complete API documentation, see [API.md](API.md).
 | `createStateActor(initial, handler)` | Simple actor where handler returns the new state |
 | `createActor(options)` | Full control with optional `reducer` and `onError` |
 | `defineMessage(type)` | Creates typed message factories (like Redux action creators) |
+| `createTypedStateActor(initial, handlers)` | Exhaustive message handling with compile-time checking |
+| `createTypedActor(options)` | Full control + exhaustive handlers + reducer |
+| `createMessageFactory()` | DTOKit factory for validating external messages |
 
 | Actor Method | Description |
 |--------------|-------------|
@@ -165,9 +168,176 @@ For most frontend and simple backend scenarios, this single-actor approach provi
 core benefits (serialization, isolation, reactivity) without the cognitive overhead of
 a full actor system.
 
+## DTOKit Integration: Exhaustive Message Handling
+
+For actors with multiple message types, the optional
+[@marianmeres/dtokit](https://github.com/marianmeres/dtokit) integration provides
+**compile-time exhaustive checking** - TypeScript will error if you forget to handle
+any message type.
+
+### The Problem
+
+With standard `createStateActor`, forgetting a message type in your switch statement
+produces no TypeScript error:
+
+```typescript
+type Message =
+  | { type: "INC" }
+  | { type: "DEC" }
+  | { type: "ADD"; amount: number };
+
+const counter = createStateActor<number, Message>(0, (state, msg) => {
+  switch (msg.type) {
+    case "INC": return state + 1;
+    case "DEC": return state - 1;
+    // Oops! Forgot "ADD" - TypeScript doesn't complain!
+  }
+});
+```
+
+### The Solution
+
+With `createTypedStateActor`, missing handlers cause compile-time errors:
+
+```typescript
+import { createTypedStateActor } from "@marianmeres/actor";
+
+// Define schemas: keys MUST match the "type" discriminator values
+type Schemas = {
+  INC: { type: "INC" };
+  DEC: { type: "DEC" };
+  ADD: { type: "ADD"; amount: number };
+};
+
+const counter = createTypedStateActor<Schemas, number>(0, {
+  INC: (msg, state) => state + 1,
+  DEC: (msg, state) => state - 1,
+  // TypeScript ERROR: Property 'ADD' is missing in type...
+});
+```
+
+### How It Works
+
+1. **Single source of truth**: Define message types once in a schemas object
+2. **Exhaustive handlers**: Provide a handler for each schema key (not a switch statement)
+3. **Type inference**: Each handler receives the correctly-typed message
+4. **Compile-time safety**: Add a new message type → compiler shows where to add handlers
+
+### Detailed Comparison
+
+| Aspect | `createStateActor` | `createTypedStateActor` |
+|--------|-------------------|------------------------|
+| Message definition | Union type: `{ type: "A" } \| { type: "B" }` | Schema object: `{ A: {...}, B: {...} }` |
+| Handler style | `switch (msg.type)` | Handler object: `{ A: fn, B: fn }` |
+| Missing case | **No error** (silent bug) | **Compile error** |
+| Adding message | Edit union + add case | Edit schema + add handler (compiler guides you) |
+| Refactoring | Manual find/replace | Compiler catches all locations |
+
+### Complete Example
+
+```typescript
+import { createTypedStateActor, createMessageFactory } from "@marianmeres/actor";
+
+// 1. Define your message schemas (single source of truth)
+type TodoSchemas = {
+  ADD: { type: "ADD"; text: string };
+  REMOVE: { type: "REMOVE"; id: number };
+  TOGGLE: { type: "TOGGLE"; id: number };
+  CLEAR_DONE: { type: "CLEAR_DONE" };
+};
+
+type Todo = { id: number; text: string; done: boolean };
+
+// 2. Create actor with exhaustive handlers
+const todos = createTypedStateActor<TodoSchemas, Todo[]>([], {
+  ADD: (msg, state) => [...state, { id: Date.now(), text: msg.text, done: false }],
+  REMOVE: (msg, state) => state.filter(t => t.id !== msg.id),
+  TOGGLE: (msg, state) => state.map(t =>
+    t.id === msg.id ? { ...t, done: !t.done } : t
+  ),
+  CLEAR_DONE: (_, state) => state.filter(t => !t.done),
+});
+
+// 3. Full type safety on send()
+await todos.send({ type: "ADD", text: "Buy milk" });
+await todos.send({ type: "TOGGLE", id: 123 });
+// await todos.send({ type: "TYPO" }); // TypeScript error!
+
+// 4. Optional: Validate external messages (WebSocket, API, etc.)
+const factory = createMessageFactory<TodoSchemas>();
+
+websocket.onmessage = (event) => {
+  const msg = factory.parse(JSON.parse(event.data));
+  if (msg) {
+    todos.send(msg); // Type-safe after validation!
+  }
+};
+```
+
+### With Rich Response Data
+
+Use `createTypedActor` when handlers return data different from state:
+
+```typescript
+import { createTypedActor } from "@marianmeres/actor";
+
+type Schemas = {
+  PROCESS: { type: "PROCESS"; data: string };
+  RESET: { type: "RESET" };
+};
+
+type State = { result: string | null };
+type Response = { result: string; metadata: { processedAt: number } };
+
+const processor = createTypedActor<Schemas, State, Response>({
+  initialState: { result: null },
+  handlers: {
+    PROCESS: (msg, state) => ({
+      result: msg.data.toUpperCase(),
+      metadata: { processedAt: Date.now() }
+    }),
+    RESET: () => ({ result: "", metadata: { processedAt: 0 } }),
+  },
+  reducer: (state, response) => ({ result: response.result }),
+});
+
+const response = await processor.send({ type: "PROCESS", data: "hello" });
+// response.result = "HELLO"
+// response.metadata.processedAt = 1701234567890
+// processor.getState() = { result: "HELLO" }
+```
+
+### When to Use DTOKit Integration
+
+**Use `createTypedStateActor` when:**
+- You have 3+ message types
+- Team members add new message types
+- You want refactoring safety
+- Messages come from external sources needing validation
+
+**Stick with `createStateActor` when:**
+- Simple actor with 1-2 message types
+- You're prototyping quickly
+- You prefer switch statement style
+
+### Note on Dependencies
+
+The `createTypedStateActor`, `createTypedActor`, and `createMessageFactory` functions use
+[@marianmeres/dtokit](https://github.com/marianmeres/dtokit) internally for exhaustive
+type checking. This dependency is included with the package - no additional installation needed.
+
+```typescript
+// All exports from single entry point
+import {
+  createStateActor,        // Basic actor
+  createTypedStateActor,   // With exhaustive checking
+  createMessageFactory,    // For external message validation
+} from "@marianmeres/actor";
+```
+
 ## Examples
 
-> Some examples below use the amazing [@marianmeres/fsm](https://github.com/marianmeres/fsm) 
+> Some examples below use the amazing [@marianmeres/fsm](https://github.com/marianmeres/fsm)
 > library. Pure coincidence.
 
 ### Async Data Fetching

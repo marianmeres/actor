@@ -527,3 +527,289 @@ Deno.test("Concurrency - maintains state consistency under rapid updates", async
 
 	assertEquals(counter.getState(), 100);
 });
+
+// ============================================================================
+// DTOKit Integration Tests
+// ============================================================================
+
+import {
+	createTypedStateActor,
+	createTypedActor,
+	createMessageFactory,
+	type ExhaustiveHandlers,
+	type MessageSchemas,
+} from "../src/with-dtokit.ts";
+
+// Test schemas for typed actors
+type CounterSchemas = {
+	INC: { type: "INC" };
+	DEC: { type: "DEC" };
+	ADD: { type: "ADD"; amount: number };
+	RESET: { type: "RESET" };
+};
+
+Deno.test("createTypedStateActor - basic message handling", async () => {
+	const counter = createTypedStateActor<CounterSchemas, number>(0, {
+		INC: (_, state) => state + 1,
+		DEC: (_, state) => state - 1,
+		ADD: (msg, state) => state + msg.amount,
+		RESET: () => 0,
+	});
+
+	await counter.send({ type: "INC" });
+	assertEquals(counter.getState(), 1);
+
+	await counter.send({ type: "ADD", amount: 10 });
+	assertEquals(counter.getState(), 11);
+
+	await counter.send({ type: "DEC" });
+	assertEquals(counter.getState(), 10);
+
+	await counter.send({ type: "RESET" });
+	assertEquals(counter.getState(), 0);
+});
+
+Deno.test("createTypedStateActor - async handlers", async () => {
+	type AsyncSchemas = {
+		FETCH: { type: "FETCH"; delay: number };
+		SET: { type: "SET"; value: string };
+	};
+
+	const actor = createTypedStateActor<AsyncSchemas, string>("initial", {
+		FETCH: async (msg, _state) => {
+			await new Promise((r) => setTimeout(r, msg.delay));
+			return "fetched";
+		},
+		SET: (msg, _state) => msg.value,
+	});
+
+	await actor.send({ type: "FETCH", delay: 5 });
+	assertEquals(actor.getState(), "fetched");
+
+	await actor.send({ type: "SET", value: "custom" });
+	assertEquals(actor.getState(), "custom");
+});
+
+Deno.test("createTypedStateActor - subscriptions work", async () => {
+	const counter = createTypedStateActor<CounterSchemas, number>(0, {
+		INC: (_, state) => state + 1,
+		DEC: (_, state) => state - 1,
+		ADD: (msg, state) => state + msg.amount,
+		RESET: () => 0,
+	});
+
+	const values: number[] = [];
+	counter.subscribe((state) => values.push(state));
+
+	await counter.send({ type: "INC" });
+	await counter.send({ type: "INC" });
+	await counter.send({ type: "ADD", amount: 5 });
+
+	assertEquals(values, [0, 1, 2, 7]);
+});
+
+Deno.test("createTypedStateActor - each handler receives correctly typed message", async () => {
+	type TestSchemas = {
+		STRING_MSG: { type: "STRING_MSG"; text: string };
+		NUMBER_MSG: { type: "NUMBER_MSG"; value: number };
+		COMPLEX_MSG: { type: "COMPLEX_MSG"; data: { nested: boolean } };
+	};
+
+	const results: string[] = [];
+
+	const actor = createTypedStateActor<TestSchemas, null>(null, {
+		STRING_MSG: (msg, state) => {
+			// msg.text is typed as string
+			results.push(`string: ${msg.text}`);
+			return state;
+		},
+		NUMBER_MSG: (msg, state) => {
+			// msg.value is typed as number
+			results.push(`number: ${msg.value}`);
+			return state;
+		},
+		COMPLEX_MSG: (msg, state) => {
+			// msg.data.nested is typed as boolean
+			results.push(`complex: ${msg.data.nested}`);
+			return state;
+		},
+	});
+
+	await actor.send({ type: "STRING_MSG", text: "hello" });
+	await actor.send({ type: "NUMBER_MSG", value: 42 });
+	await actor.send({ type: "COMPLEX_MSG", data: { nested: true } });
+
+	assertEquals(results, ["string: hello", "number: 42", "complex: true"]);
+});
+
+Deno.test("createTypedActor - with reducer for rich responses", async () => {
+	type ProcessSchemas = {
+		PROCESS: { type: "PROCESS"; input: string };
+		CLEAR: { type: "CLEAR" };
+	};
+
+	type State = { lastResult: string | null; processCount: number };
+	type Response = { output: string; timestamp: number };
+
+	const actor = createTypedActor<ProcessSchemas, State, Response>({
+		initialState: { lastResult: null, processCount: 0 },
+		handlers: {
+			PROCESS: (msg, _state) => ({
+				output: msg.input.toUpperCase(),
+				timestamp: Date.now(),
+			}),
+			CLEAR: () => ({
+				output: "",
+				timestamp: 0,
+			}),
+		},
+		reducer: (state, response) => ({
+			lastResult: response.output,
+			processCount: state.processCount + 1,
+		}),
+	});
+
+	const response = await actor.send({ type: "PROCESS", input: "hello" });
+	assertEquals(response.output, "HELLO");
+	assertEquals(typeof response.timestamp, "number");
+
+	const state = actor.getState();
+	assertEquals(state.lastResult, "HELLO");
+	assertEquals(state.processCount, 1);
+});
+
+Deno.test("createTypedActor - onError callback", async () => {
+	type ErrorSchemas = {
+		FAIL: { type: "FAIL" };
+		OK: { type: "OK" };
+	};
+
+	const errors: { error: Error; message: unknown }[] = [];
+
+	const actor = createTypedActor<ErrorSchemas, null, null>({
+		initialState: null,
+		handlers: {
+			FAIL: () => {
+				throw new Error("Intentional failure");
+			},
+			OK: () => null,
+		},
+		onError: (error, message) => {
+			errors.push({ error, message });
+		},
+	});
+
+	await assertRejects(() => actor.send({ type: "FAIL" }), Error, "Intentional failure");
+	assertEquals(errors.length, 1);
+	assertEquals(errors[0].error.message, "Intentional failure");
+	assertEquals((errors[0].message as { type: string }).type, "FAIL");
+});
+
+Deno.test("createMessageFactory - validates message structure", () => {
+	const factory = createMessageFactory<CounterSchemas>();
+
+	// Valid messages - have discriminator field
+	const inc = factory.parse({ type: "INC" });
+	assertEquals(inc?.type, "INC");
+
+	const add = factory.parse({ type: "ADD", amount: 5 });
+	assertEquals(add?.type, "ADD");
+
+	// Note: dtokit validates discriminator field exists, not that it's a known value
+	// This is by design - minimal runtime validation
+	const hasType = factory.parse({ type: "UNKNOWN" });
+	assertEquals(hasType?.type, "UNKNOWN"); // Passes because "type" field exists
+
+	// Invalid - missing discriminator field
+	const noType = factory.parse({ foo: "bar" });
+	assertEquals(noType, null);
+
+	// Invalid - not an object
+	const notObject = factory.parse("string");
+	assertEquals(notObject, null);
+
+	const nullValue = factory.parse(null);
+	assertEquals(nullValue, null);
+});
+
+Deno.test("createMessageFactory - isValid check", () => {
+	const factory = createMessageFactory<CounterSchemas>();
+
+	// isValid checks that discriminator field exists and is non-empty string
+	assertEquals(factory.isValid({ type: "INC" }), true);
+	assertEquals(factory.isValid({ type: "ADD", amount: 5 }), true);
+	assertEquals(factory.isValid({ type: "UNKNOWN" }), true); // Has valid "type" field
+	assertEquals(factory.isValid({ type: "" }), false); // Empty string discriminator
+	assertEquals(factory.isValid({ foo: "bar" }), false); // Missing "type" field
+	assertEquals(factory.isValid(null), false);
+});
+
+Deno.test("createMessageFactory - getId extracts discriminator", () => {
+	const factory = createMessageFactory<CounterSchemas>();
+
+	const msg = factory.parse({ type: "DEC" });
+	if (msg) {
+		const id = factory.getId(msg);
+		assertEquals(id, "DEC");
+	}
+});
+
+Deno.test("createTypedStateActor - FIFO message ordering preserved", async () => {
+	type OrderSchemas = {
+		APPEND: { type: "APPEND"; value: string };
+	};
+
+	const actor = createTypedStateActor<OrderSchemas, string[]>([], {
+		APPEND: async (msg, state) => {
+			await new Promise((r) => setTimeout(r, Math.random() * 10));
+			return [...state, msg.value];
+		},
+	});
+
+	await Promise.all([
+		actor.send({ type: "APPEND", value: "A" }),
+		actor.send({ type: "APPEND", value: "B" }),
+		actor.send({ type: "APPEND", value: "C" }),
+	]);
+
+	assertEquals(actor.getState(), ["A", "B", "C"]);
+});
+
+Deno.test("createTypedStateActor - destroy works", async () => {
+	const counter = createTypedStateActor<CounterSchemas, number>(0, {
+		INC: (_, state) => state + 1,
+		DEC: (_, state) => state - 1,
+		ADD: (msg, state) => state + msg.amount,
+		RESET: () => 0,
+	});
+
+	await counter.send({ type: "INC" });
+	counter.destroy();
+
+	await assertRejects(() => counter.send({ type: "INC" }), Error, "Actor has been destroyed");
+	assertEquals(counter.getState(), 1); // State still accessible
+});
+
+// Type-level test: This ensures exhaustiveness is enforced at compile time
+// If you uncomment the incomplete handlers below, TypeScript should error
+Deno.test("createTypedStateActor - exhaustiveness enforced (compile-time)", () => {
+	// This test verifies the types work correctly
+	// The actual exhaustiveness check is at compile time
+
+	type TestSchemas = {
+		A: { type: "A" };
+		B: { type: "B" };
+	};
+
+	// Complete handlers - this compiles
+	const _handlers: ExhaustiveHandlers<TestSchemas, number, number> = {
+		A: (_, state) => state + 1,
+		B: (_, state) => state - 1,
+	};
+
+	// Incomplete handlers would cause compile error:
+	// const _incomplete: ExhaustiveHandlers<TestSchemas, number, number> = {
+	//   A: (_, state) => state + 1,
+	//   // Missing B - TypeScript error!
+	// };
+});

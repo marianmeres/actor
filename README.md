@@ -371,34 +371,51 @@ A common DDD pattern: use a finite state machine to coordinate multiple domain a
 Each actor manages its own domain state, while the FSM orchestrates the workflow.
 
 ```typescript
-import { createStateActor } from "@marianmeres/actor";
+import { createTypedStateActor } from "@marianmeres/actor";
 import { createFsm } from "@marianmeres/fsm";
 
 // Domain actors - each manages its own bounded context
-const cart = createStateActor({ items: [], total: 0 }, (state, msg) => {
-  switch (msg.type) {
-    case "ADD_ITEM": return { ...state, items: [...state.items, msg.item] };
-    case "CLEAR": return { items: [], total: 0 };
-    default: return state;
-  }
-});
 
-const payment = createStateActor({ status: "idle", txId: null }, (state, msg) => {
-  switch (msg.type) {
-    case "PROCESS": return { status: "processing", txId: null };
-    case "SUCCESS": return { status: "success", txId: msg.txId };
-    case "FAIL": return { status: "failed", txId: null };
-    default: return state;
-  }
-});
+type CartSchemas = {
+  ADD_ITEM: { type: "ADD_ITEM"; item: { sku: string; qty: number } };
+  CLEAR: { type: "CLEAR" };
+};
 
-const inventory = createStateActor({ reserved: [] }, (state, msg) => {
-  switch (msg.type) {
-    case "RESERVE": return { reserved: [...state.reserved, ...msg.items] };
-    case "RELEASE": return { reserved: [] };
-    default: return state;
+const cart = createTypedStateActor<CartSchemas, { items: Array<{ sku: string; qty: number }>; total: number }>(
+  { items: [], total: 0 },
+  {
+    ADD_ITEM: (msg, state) => ({ ...state, items: [...state.items, msg.item] }),
+    CLEAR: () => ({ items: [], total: 0 }),
   }
-});
+);
+
+type PaymentSchemas = {
+  PROCESS: { type: "PROCESS" };
+  SUCCESS: { type: "SUCCESS"; txId: string };
+  FAIL: { type: "FAIL" };
+};
+
+const payment = createTypedStateActor<PaymentSchemas, { status: string; txId: string | null }>(
+  { status: "idle", txId: null },
+  {
+    PROCESS: () => ({ status: "processing", txId: null }),
+    SUCCESS: (msg) => ({ status: "success", txId: msg.txId }),
+    FAIL: () => ({ status: "failed", txId: null }),
+  }
+);
+
+type InventorySchemas = {
+  RESERVE: { type: "RESERVE"; items: Array<{ sku: string; qty: number }> };
+  RELEASE: { type: "RELEASE" };
+};
+
+const inventory = createTypedStateActor<InventorySchemas, { reserved: Array<{ sku: string; qty: number }> }>(
+  { reserved: [] },
+  {
+    RESERVE: (msg, state) => ({ reserved: [...state.reserved, ...msg.items] }),
+    RELEASE: () => ({ reserved: [] }),
+  }
+);
 
 // FSM orchestrates the checkout workflow
 const checkoutFsm = createFsm({
@@ -517,8 +534,31 @@ const campaignFsm = createFsm({
 In DDD, the aggregate root coordinates changes within a bounded context:
 
 ```typescript
+import { createTypedStateActor } from "@marianmeres/actor";
+
+// Define the domain types
+type Item = { sku: string; qty: number; price: number };
+type Payment = { amount: number; method: string };
+type Shipment = { trackingId: string; carrier: string };
+
+type OrderState = {
+  id: string;
+  status: "pending" | "submitted" | "paid" | "shipped";
+  items: Item[];
+  payments: Payment[];
+  shipments: Shipment[];
+};
+
+// Define all order commands (message schemas)
+type OrderSchemas = {
+  ADD_ITEM: { type: "ADD_ITEM"; item: Item };
+  SUBMIT: { type: "SUBMIT" };
+  RECORD_PAYMENT: { type: "RECORD_PAYMENT"; payment: Payment };
+  SHIP: { type: "SHIP"; shipment: Shipment };
+};
+
 // Order aggregate - the actor IS the aggregate root
-const createOrderActor = (orderId: string) => createStateActor(
+const createOrderActor = (orderId: string) => createTypedStateActor<OrderSchemas, OrderState>(
   {
     id: orderId,
     status: "pending",
@@ -526,30 +566,24 @@ const createOrderActor = (orderId: string) => createStateActor(
     payments: [],
     shipments: []
   },
-  (state, msg) => {
-    switch (msg.type) {
-      case "ADD_ITEM":
-        if (state.status !== "pending") return state; // Invariant
-        return { ...state, items: [...state.items, msg.item] };
-
-      case "SUBMIT":
-        if (state.items.length === 0) return state; // Invariant
-        return { ...state, status: "submitted" };
-
-      case "RECORD_PAYMENT":
-        return {
-          ...state,
-          payments: [...state.payments, msg.payment],
-          status: calculateStatus(state.payments, msg.payment)
-        };
-
-      case "SHIP":
-        if (state.status !== "paid") return state; // Invariant
-        return { ...state, shipments: [...state.shipments, msg.shipment] };
-
-      default:
-        return state;
-    }
+  {
+    ADD_ITEM: (msg, state) => {
+      if (state.status !== "pending") return state; // Invariant
+      return { ...state, items: [...state.items, msg.item] };
+    },
+    SUBMIT: (_, state) => {
+      if (state.items.length === 0) return state; // Invariant
+      return { ...state, status: "submitted" };
+    },
+    RECORD_PAYMENT: (msg, state) => ({
+      ...state,
+      payments: [...state.payments, msg.payment],
+      status: calculateStatus(state.payments, msg.payment)
+    }),
+    SHIP: (msg, state) => {
+      if (state.status !== "paid") return state; // Invariant
+      return { ...state, shipments: [...state.shipments, msg.shipment] };
+    },
   }
 );
 
@@ -558,8 +592,8 @@ const order1 = createOrderActor("order-1");
 const order2 = createOrderActor("order-2");
 
 // Messages to different orders process independently
-await order1.send({ type: "ADD_ITEM", item: { sku: "A", qty: 2 } });
-await order2.send({ type: "ADD_ITEM", item: { sku: "B", qty: 1 } });
+await order1.send({ type: "ADD_ITEM", item: { sku: "A", qty: 2, price: 10 } });
+await order2.send({ type: "ADD_ITEM", item: { sku: "B", qty: 1, price: 25 } });
 ```
 
 ### Error Handling with FSM Orchestration

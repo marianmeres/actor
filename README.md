@@ -389,6 +389,45 @@ await order1.send({ type: "ADD_ITEM", item: { sku: "A", qty: 2 } });
 await order2.send({ type: "ADD_ITEM", item: { sku: "B", qty: 1 } });
 ```
 
+### Error Handling with FSM Orchestration
+
+Use `onError` to propagate actor failures to the FSM layer:
+
+```typescript
+// FSM with error handling
+const workflowFsm = createFsm({
+  initial: "IDLE",
+  context: { error: null },
+  states: {
+    IDLE: { on: { start: "PROCESSING" } },
+    PROCESSING: { on: { done: "COMPLETED", error: "ERROR" } },
+    COMPLETED: {},
+    ERROR: {}
+  }
+});
+
+// Actor with onError wired to FSM
+const processor = createActor({
+  initialState: { result: null },
+  handler: async (state, msg) => {
+    const res = await fetch(msg.url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return { result: await res.json() };
+  },
+  reducer: (_, response) => response,
+  onError: (error, message) => {
+    // Transition FSM to error state when actor fails
+    workflowFsm.context.error = { error: String(error), message };
+    workflowFsm.transition("error");
+  }
+});
+
+// Usage
+workflowFsm.transition("start");
+await processor.send({ url: "/api/data" });  // If this throws, FSM → ERROR
+workflowFsm.transition("done");              // Only reached on success
+```
+
 ### System State History (Audit Trail)
 
 Track state changes across multiple actors and FSM for debugging, audit, or undo/redo:

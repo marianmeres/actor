@@ -429,6 +429,132 @@ await processor.send({ url: "/api/data" });  // If this throws, FSM → ERROR
 workflowFsm.transition("done");              // Only reached on success
 ```
 
+### Nested FSM: Actor-Level + App-Level Orchestration
+
+Each actor can have its own internal FSM for complex lifecycle management, while a global
+FSM orchestrates multiple actors at the application level.
+
+```typescript
+import { createActor } from "@marianmeres/actor";
+import { createFsm } from "@marianmeres/fsm";
+
+// Factory: creates a "job" actor with its own internal FSM lifecycle
+const createJobActor = (id: string, work: () => Promise<unknown>) => {
+  // Inner FSM - manages this job's lifecycle
+  const jobFsm = createFsm({
+    initial: "IDLE",
+    context: { result: null, error: null },
+    states: {
+      IDLE: { on: { start: "RUNNING" } },
+      RUNNING: { on: { complete: "DONE", fail: "FAILED" } },
+      DONE: {},
+      FAILED: { on: { retry: "RUNNING" } }  // Can retry from failed
+    }
+  });
+
+  // Actor wraps the FSM and handles async work
+  const actor = createActor<
+    { id: string; status: string; result: unknown; error: unknown },
+    { type: "START" } | { type: "RETRY" },
+    { status: string }
+  >({
+    initialState: { id, status: "IDLE", result: null, error: null },
+    handler: async (state, msg) => {
+      if (msg.type === "START" || msg.type === "RETRY") {
+        jobFsm.transition(msg.type === "START" ? "start" : "retry");
+        try {
+          const result = await work();
+          jobFsm.transition("complete");
+          jobFsm.context.result = result;
+          return { status: "DONE" };
+        } catch (e) {
+          jobFsm.transition("fail");
+          jobFsm.context.error = e;
+          return { status: "FAILED" };
+        }
+      }
+      return { status: jobFsm.state };
+    },
+    reducer: (state, response) => ({
+      ...state,
+      status: response.status,
+      result: jobFsm.context.result,
+      error: jobFsm.context.error
+    })
+  });
+
+  return { actor, fsm: jobFsm };
+};
+
+// Create job actors with different work
+const job1 = createJobActor("job-1", async () => {
+  await delay(100);
+  return { data: "result-1" };
+});
+const job2 = createJobActor("job-2", async () => {
+  await delay(200);
+  if (Math.random() < 0.3) throw new Error("Random failure");
+  return { data: "result-2" };
+});
+
+// App-level FSM - orchestrates the batch of jobs
+const batchFsm = createFsm({
+  initial: "IDLE",
+  context: { completed: 0, failed: 0, total: 2 },
+  states: {
+    IDLE: { on: { run: "RUNNING" } },
+    RUNNING: {
+      onEnter: async (ctx) => {
+        // Start all jobs in parallel
+        const results = await Promise.all([
+          job1.actor.send({ type: "START" }),
+          job2.actor.send({ type: "START" })
+        ]);
+
+        // Tally results
+        results.forEach(r => {
+          if (r.status === "DONE") ctx.completed++;
+          else ctx.failed++;
+        });
+
+        batchFsm.transition(ctx.failed > 0 ? "partial" : "success");
+      },
+      on: { success: "COMPLETED", partial: "PARTIAL_FAILURE" }
+    },
+    PARTIAL_FAILURE: {
+      on: {
+        retry: "RETRYING",
+        accept: "COMPLETED"
+      }
+    },
+    RETRYING: {
+      onEnter: async (ctx) => {
+        // Retry only failed jobs
+        const failedJobs = [job1, job2].filter(j => j.fsm.state === "FAILED");
+        for (const job of failedJobs) {
+          const result = await job.actor.send({ type: "RETRY" });
+          if (result.status === "DONE") {
+            ctx.failed--;
+            ctx.completed++;
+          }
+        }
+        batchFsm.transition(ctx.failed > 0 ? "partial" : "success");
+      },
+      on: { success: "COMPLETED", partial: "PARTIAL_FAILURE" }
+    },
+    COMPLETED: {}
+  }
+});
+
+// Subscribe to see the layered state
+batchFsm.subscribe(({ state }) => console.log("Batch:", state));
+job1.actor.subscribe(s => console.log("Job1:", s.status));
+job2.actor.subscribe(s => console.log("Job2:", s.status));
+
+// Run the batch
+batchFsm.transition("run");
+```
+
 ### System State History (Audit Trail)
 
 Track state changes across multiple actors and FSM for debugging, audit, or undo/redo:

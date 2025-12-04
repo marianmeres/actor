@@ -3,7 +3,8 @@
 	"version": "1.0.3",
 	"exports": "./src/mod.ts",
 	"tasks": {
-		"test": "deno test --watch",
+		"test": "deno test",
+		"test:watch": "deno test --watch",
 		"npm:build": "deno run -A scripts/build-npm.ts",
 		"npm:publish": "deno run -A scripts/build-npm.ts && cd ./.npm-dist && npm publish --access=public",
 		"release": "deno run -A jsr:@marianmeres/deno-release",

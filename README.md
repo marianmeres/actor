@@ -394,7 +394,7 @@ await order2.send({ type: "ADD_ITEM", item: { sku: "B", qty: 1 } });
 Use `onError` to propagate actor failures to the FSM layer:
 
 ```typescript
-// FSM with error handling
+// FSM with error handling - payload stored via onEnter
 const workflowFsm = createFsm({
   initial: "IDLE",
   context: { error: null },
@@ -402,7 +402,9 @@ const workflowFsm = createFsm({
     IDLE: { on: { start: "PROCESSING" } },
     PROCESSING: { on: { done: "COMPLETED", error: "ERROR" } },
     COMPLETED: {},
-    ERROR: {}
+    ERROR: {
+      onEnter: (ctx, payload) => { ctx.error = payload; }  // Store error from payload
+    }
   }
 });
 
@@ -416,9 +418,8 @@ const processor = createActor({
   },
   reducer: (_, response) => response,
   onError: (error, message) => {
-    // Transition FSM to error state when actor fails
-    workflowFsm.context.error = { error: String(error), message };
-    workflowFsm.transition("error");
+    // Pass error as transition payload
+    workflowFsm.transition("error", { error: String(error), message });
   }
 });
 

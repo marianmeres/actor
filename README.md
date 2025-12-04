@@ -67,95 +67,28 @@ counter.destroy();
 
 ## API Reference
 
-### `createActor<TState, TMessage, TResponse>(options)`
+For complete API documentation, see [API.md](API.md).
 
-Creates an actor with full control over state updates.
+| Function | Description |
+|----------|-------------|
+| `createStateActor(initial, handler)` | Simple actor where handler returns the new state |
+| `createActor(options)` | Full control with optional `reducer` and `onError` |
+| `defineMessage(type)` | Creates typed message factories (like Redux action creators) |
 
-**Type Parameters:**
-- `TState` - The type of the actor's state
-- `TMessage` - The type of messages the actor can receive
-- `TResponse` - The type of response the handler returns (defaults to `void`)
+| Actor Method | Description |
+|--------------|-------------|
+| `send(msg)` | Queue message, returns `Promise<TResponse>` |
+| `subscribe(fn)` | Subscribe to state changes (called immediately + on change) |
+| `getState()` | Get current state synchronously |
+| `destroy()` | Clear mailbox and subscribers |
 
-**Options:**
-- `initialState: TState` - The initial state
-- `handler: (state, message) => TResponse | Promise<TResponse>` - Message handler
-- `reducer?: (state, response) => TState` - Transforms handler response to new state
-- `onError?: (error, message) => void` - Called when handler throws
-
-**Returns:** `Actor<TState, TMessage, TResponse>`
-
-### `createStateActor<TState, TMessage>(initialState, handler)`
-
-Simplified actor where the handler directly returns the new state.
-
-```typescript
-const actor = createStateActor<number, { delta: number }>(
-  0,
-  (state, msg) => state + msg.delta
-);
-```
-
-### `defineMessage<TType, TPayload?>(type)`
-
-Creates typed message factory functions (like Redux action creators).
-
-```typescript
-const increment = defineMessage("INCREMENT");
-const add = defineMessage<"ADD", number>("ADD");
-
-await counter.send(increment());  // { type: "INCREMENT" }
-await counter.send(add(5));       // { type: "ADD", payload: 5 }
-```
-
-### Actor Methods
-
-#### `send(message): Promise<TResponse>`
-
-Sends a message to the actor. Messages are queued and processed sequentially.
-Returns a promise that resolves with the handler's response.
-
-```typescript
-const result = await actor.send({ type: "ADD", value: 5 });
-```
-
-#### `subscribe(fn): Unsubscribe`
-
-Subscribes to state changes. The callback is called immediately with the current
-state, then whenever state changes.
-
-```typescript
-const unsubscribe = actor.subscribe((state) => console.log(state));
-// Later:
-unsubscribe();
-```
-
-#### `getState(): TState`
-
-Returns the current state synchronously.
-
-#### `destroy(): void`
-
-Destroys the actor, clearing the mailbox and all subscribers. After destruction,
-`send()` will reject with "Actor has been destroyed".
-
-## Understanding the Reducer
+### Understanding the Reducer
 
 The `reducer` option separates **what the handler returns** from **how state is updated**.
 
-### Without reducer (simple case)
+**Without reducer** (`createStateActor`): handler's return value IS the new state.
 
-When using `createStateActor`, the handler's return value IS the new state:
-
-```typescript
-const counter = createStateActor<number, { delta: number }>(
-  0,
-  (state, msg) => state + msg.delta  // Returns new state directly
-);
-```
-
-### With reducer (advanced case)
-
-When you need the handler to return something different from the state:
+**With reducer**: handler can return rich data, reducer extracts what goes into state:
 
 ```typescript
 const actor = createActor<
@@ -165,13 +98,9 @@ const actor = createActor<
 >({
   initialState: 0,
   handler: (state, msg) => {
-    // Handler returns rich response data
     return { delta: msg.length, log: `Processed: ${msg}` };
   },
-  reducer: (state, response) => {
-    // Reducer extracts only what's needed for state
-    return state + response.delta;
-  },
+  reducer: (state, response) => state + response.delta,
 });
 
 const result = await actor.send("hello");
@@ -179,96 +108,8 @@ const result = await actor.send("hello");
 // state = 5                                        ← but state only stores delta
 ```
 
-**Use cases for reducers:**
-- **Async operations**: Handler fetches data, returns `{ data, metadata }`. Reducer stores only `data`.
-- **Validation**: Handler validates, returns `{ valid, errors }`. Reducer updates state only if valid.
-- **Side effects**: Handler performs action, returns status. Reducer decides what to persist.
-
-## Examples
-
-### Form State Management
-
-```typescript
-interface FormState {
-  fields: Record<string, { value: string; error: string | null; touched: boolean }>;
-  isSubmitting: boolean;
-  submitError: string | null;
-}
-
-type FormMessage =
-  | { type: "SET_FIELD"; name: string; value: string }
-  | { type: "TOUCH_FIELD"; name: string }
-  | { type: "SUBMIT" }
-  | { type: "SUBMIT_SUCCESS" }
-  | { type: "SUBMIT_ERROR"; error: string }
-  | { type: "RESET" };
-
-const form = createStateActor<FormState, FormMessage>(
-  {
-    fields: {
-      email: { value: "", error: null, touched: false },
-      password: { value: "", error: null, touched: false },
-    },
-    isSubmitting: false,
-    submitError: null,
-  },
-  (state, msg) => {
-    switch (msg.type) {
-      case "SET_FIELD":
-        return {
-          ...state,
-          fields: {
-            ...state.fields,
-            [msg.name]: { ...state.fields[msg.name], value: msg.value },
-          },
-        };
-      case "SUBMIT":
-        return { ...state, isSubmitting: true, submitError: null };
-      case "SUBMIT_SUCCESS":
-        return { ...state, isSubmitting: false };
-      case "SUBMIT_ERROR":
-        return { ...state, isSubmitting: false, submitError: msg.error };
-      case "RESET":
-        return { ...state, isSubmitting: false, submitError: null };
-      default:
-        return state;
-    }
-  }
-);
-```
-
-### Async Data Fetching
-
-```typescript
-interface DataState {
-  data: unknown | null;
-  loading: boolean;
-  error: string | null;
-}
-
-type FetchMessage = { type: "FETCH"; url: string };
-
-const fetcher = createActor<DataState, FetchMessage, DataState>({
-  initialState: { data: null, loading: false, error: null },
-  handler: async (state, msg) => {
-    try {
-      const res = await fetch(msg.url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      return { data, loading: false, error: null };
-    } catch (e) {
-      return { data: null, loading: false, error: String(e) };
-    }
-  },
-  reducer: (_, response) => response,
-});
-
-// Multiple rapid fetches are serialized - no race conditions!
-fetcher.send({ type: "FETCH", url: "/api/data" });
-fetcher.send({ type: "FETCH", url: "/api/data" });
-fetcher.send({ type: "FETCH", url: "/api/data" });
-// Only the responses arrive in order, one at a time
-```
+**Use cases:** async operations returning `{ data, metadata }`, validation returning
+`{ valid, errors }`, side effects returning status while reducer decides what to persist.
 
 ## When to Use Actors
 
@@ -325,9 +166,229 @@ For most frontend and simple backend scenarios, this single-actor approach provi
 core benefits (serialization, isolation, reactivity) without the cognitive overhead of
 a full actor system.
 
-## Full API Documentation
+## Examples
 
-For complete API documentation including all types and detailed parameter descriptions, see [API.md](API.md).
+### Async Data Fetching
+
+```typescript
+interface DataState {
+  data: unknown | null;
+  loading: boolean;
+  error: string | null;
+}
+
+const fetcher = createActor<DataState, { type: "FETCH"; url: string }, DataState>({
+  initialState: { data: null, loading: false, error: null },
+  handler: async (state, msg) => {
+    const res = await fetch(msg.url);
+    const data = await res.json();
+    return { data, loading: false, error: null };
+  },
+  reducer: (_, response) => response,
+});
+
+// Multiple rapid fetches are serialized - no race conditions!
+fetcher.send({ type: "FETCH", url: "/api/data" });
+fetcher.send({ type: "FETCH", url: "/api/data" });
+// Responses arrive in order, one at a time
+```
+
+### Orchestrating Multiple Actors with FSM
+
+A common DDD pattern: use a finite state machine to coordinate multiple domain actors.
+Each actor manages its own domain state, while the FSM orchestrates the workflow.
+
+```typescript
+import { createStateActor } from "@marianmeres/actor";
+import { createFsm } from "@marianmeres/fsm";
+
+// Domain actors - each manages its own bounded context
+const cart = createStateActor({ items: [], total: 0 }, (state, msg) => {
+  switch (msg.type) {
+    case "ADD_ITEM": return { ...state, items: [...state.items, msg.item] };
+    case "CLEAR": return { items: [], total: 0 };
+    default: return state;
+  }
+});
+
+const payment = createStateActor({ status: "idle", txId: null }, (state, msg) => {
+  switch (msg.type) {
+    case "PROCESS": return { status: "processing", txId: null };
+    case "SUCCESS": return { status: "success", txId: msg.txId };
+    case "FAIL": return { status: "failed", txId: null };
+    default: return state;
+  }
+});
+
+const inventory = createStateActor({ reserved: [] }, (state, msg) => {
+  switch (msg.type) {
+    case "RESERVE": return { reserved: [...state.reserved, ...msg.items] };
+    case "RELEASE": return { reserved: [] };
+    default: return state;
+  }
+});
+
+// FSM orchestrates the checkout workflow
+const checkoutFsm = createFsm({
+  initial: "IDLE",
+  context: { error: null },
+  states: {
+    IDLE: {
+      on: { start: "RESERVING" }
+    },
+    RESERVING: {
+      onEnter: async (ctx) => {
+        await inventory.send({ type: "RESERVE", items: cart.getState().items });
+        checkoutFsm.transition("reserved");
+      },
+      on: { reserved: "CHARGING", fail: "FAILED" }
+    },
+    CHARGING: {
+      onEnter: async (ctx) => {
+        await payment.send({ type: "PROCESS" });
+        // Simulate payment processing
+        const success = Math.random() > 0.1;
+        if (success) {
+          await payment.send({ type: "SUCCESS", txId: "tx_123" });
+          checkoutFsm.transition("charged");
+        } else {
+          await payment.send({ type: "FAIL" });
+          checkoutFsm.transition("fail");
+        }
+      },
+      on: { charged: "COMPLETED", fail: "ROLLING_BACK" }
+    },
+    ROLLING_BACK: {
+      onEnter: async () => {
+        await inventory.send({ type: "RELEASE" });
+        checkoutFsm.transition("rolled_back");
+      },
+      on: { rolled_back: "FAILED" }
+    },
+    COMPLETED: {
+      onEnter: async () => {
+        await cart.send({ type: "CLEAR" });
+      }
+    },
+    FAILED: {}
+  }
+});
+
+// Usage: subscribe to FSM for workflow state, actors for domain state
+checkoutFsm.subscribe(({ state }) => console.log("Checkout:", state));
+payment.subscribe((s) => console.log("Payment:", s.status));
+```
+
+### Multi-Actor Notification System
+
+```typescript
+// User preferences actor
+const preferences = createStateActor(
+  { email: true, push: true, sms: false },
+  (state, msg) => ({ ...state, [msg.channel]: msg.enabled })
+);
+
+// Notification queue actor - serializes delivery
+const notificationQueue = createActor({
+  initialState: { pending: 0, sent: 0 },
+  handler: async (state, msg) => {
+    const prefs = preferences.getState();
+    const results = [];
+
+    if (prefs.email && msg.channels.includes("email")) {
+      await sendEmail(msg.to, msg.content);
+      results.push("email");
+    }
+    if (prefs.push && msg.channels.includes("push")) {
+      await sendPush(msg.to, msg.content);
+      results.push("push");
+    }
+
+    return { delivered: results, messageId: msg.id };
+  },
+  reducer: (state, response) => ({
+    pending: state.pending - 1,
+    sent: state.sent + response.delivered.length
+  })
+});
+
+// FSM controls notification campaign lifecycle
+const campaignFsm = createFsm({
+  initial: "DRAFT",
+  context: { recipientCount: 0, sentCount: 0 },
+  states: {
+    DRAFT: { on: { schedule: "SCHEDULED", send: "SENDING" } },
+    SCHEDULED: { on: { trigger: "SENDING", cancel: "DRAFT" } },
+    SENDING: {
+      onEnter: async (ctx) => {
+        for (const recipient of ctx.recipients) {
+          await notificationQueue.send({
+            id: crypto.randomUUID(),
+            to: recipient,
+            content: ctx.message,
+            channels: ["email", "push"]
+          });
+          ctx.sentCount++;
+        }
+        campaignFsm.transition("complete");
+      },
+      on: { complete: "COMPLETED", pause: "PAUSED" }
+    },
+    PAUSED: { on: { resume: "SENDING" } },
+    COMPLETED: {}
+  }
+});
+```
+
+### Actor as Aggregate Root
+
+In DDD, the aggregate root coordinates changes within a bounded context:
+
+```typescript
+// Order aggregate - the actor IS the aggregate root
+const createOrderActor = (orderId: string) => createStateActor(
+  {
+    id: orderId,
+    status: "pending",
+    items: [],
+    payments: [],
+    shipments: []
+  },
+  (state, msg) => {
+    switch (msg.type) {
+      case "ADD_ITEM":
+        if (state.status !== "pending") return state; // Invariant
+        return { ...state, items: [...state.items, msg.item] };
+
+      case "SUBMIT":
+        if (state.items.length === 0) return state; // Invariant
+        return { ...state, status: "submitted" };
+
+      case "RECORD_PAYMENT":
+        return {
+          ...state,
+          payments: [...state.payments, msg.payment],
+          status: calculateStatus(state.payments, msg.payment)
+        };
+
+      case "SHIP":
+        if (state.status !== "paid") return state; // Invariant
+        return { ...state, shipments: [...state.shipments, msg.shipment] };
+
+      default:
+        return state;
+    }
+  }
+);
+
+// Each order is an independent actor maintaining its own invariants
+const order1 = createOrderActor("order-1");
+const order2 = createOrderActor("order-2");
+
+// Messages to different orders process independently
+await order1.send({ type: "ADD_ITEM", item: { sku: "A", qty: 2 } });
+await order2.send({ type: "ADD_ITEM", item: { sku: "B", qty: 1 } });
+```
 
 ## License
 

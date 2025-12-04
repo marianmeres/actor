@@ -8,6 +8,10 @@ Complete API documentation for `@marianmeres/actor`.
   - [createActor](#createactoroptions)
   - [createStateActor](#createstateactorinitialstate-handler)
   - [defineMessage](#definemessagetype)
+- [DTOKit Integration](#dtokit-integration)
+  - [createTypedStateActor](#createtypedstateactorinitialstate-handlers)
+  - [createTypedActor](#createtypedactoroptions)
+  - [createMessageFactory](#createmessagefactory)
 - [Types](#types)
   - [Actor](#actortstate-tmessage-tresponse)
   - [ActorOptions](#actoroptionsststate-tmessage-tresponse)
@@ -16,6 +20,11 @@ Complete API documentation for `@marianmeres/actor`.
   - [Subscriber](#subscribertstate)
   - [Unsubscribe](#unsubscribe)
   - [MessageCreator](#messagecreatorttpayload-tmessage)
+- [DTOKit Types](#dtokit-types)
+  - [MessageSchemas](#messageschemas)
+  - [MessageUnion](#messageuniontschemas)
+  - [ExhaustiveHandlers](#exhaustivehandlerstschemas-tstate-tresult)
+  - [TypedActorOptions](#typedactoroptionsschemas-tstate-tresponse)
 
 ---
 
@@ -189,6 +198,205 @@ const setName = defineMessage<"SET_NAME", string>("SET_NAME");
 
 await counter.send(add(5));           // { type: "ADD", payload: 5 }
 await user.send(setName("Alice"));    // { type: "SET_NAME", payload: "Alice" }
+```
+
+---
+
+## DTOKit Integration
+
+These functions provide compile-time exhaustive message handling using [@marianmeres/dtokit](https://github.com/marianmeres/dtokit). TypeScript will error if you forget to handle any message type.
+
+### `createTypedStateActor(initialState, handlers)`
+
+Creates a state actor with compile-time exhaustive message handling.
+
+This is the recommended way to create actors when you have multiple message types and want TypeScript to enforce that all message types are handled.
+
+```typescript
+function createTypedStateActor<TSchemas extends MessageSchemas, TState>(
+  initialState: TState,
+  handlers: ExhaustiveHandlers<TSchemas, TState, TState>
+): Actor<TState, MessageUnion<TSchemas>, TState>
+```
+
+**Type Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `TSchemas` | Object mapping message keys to their types (with "type" discriminator) |
+| `TState` | The actor's state type |
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `initialState` | `TState` | The initial state of the actor |
+| `handlers` | `ExhaustiveHandlers<TSchemas, TState, TState>` | Object with handler for each message type (exhaustive) |
+
+**Returns:** `Actor<TState, MessageUnion<TSchemas>, TState>`
+
+**Key Benefits:**
+
+- **Exhaustive checking**: TypeScript errors if you forget to handle a message type
+- **Single source of truth**: Message types are defined once in the schemas object
+- **Type inference**: Each handler receives correctly-typed message and state
+- **Refactoring safety**: Rename/remove a message type → compiler shows all places to update
+
+**Example:**
+
+```typescript
+// Define all message types in one place
+type TodoSchemas = {
+  ADD: { type: "ADD"; text: string };
+  REMOVE: { type: "REMOVE"; id: number };
+  TOGGLE: { type: "TOGGLE"; id: number };
+  CLEAR_DONE: { type: "CLEAR_DONE" };
+};
+
+type Todo = { id: number; text: string; done: boolean };
+
+const todos = createTypedStateActor<TodoSchemas, Todo[]>([], {
+  ADD: (msg, state) => [...state, { id: Date.now(), text: msg.text, done: false }],
+  REMOVE: (msg, state) => state.filter(t => t.id !== msg.id),
+  TOGGLE: (msg, state) => state.map(t =>
+    t.id === msg.id ? { ...t, done: !t.done } : t
+  ),
+  CLEAR_DONE: (_, state) => state.filter(t => !t.done),
+});
+
+// Full type safety on send()
+await todos.send({ type: "ADD", text: "Buy milk" });
+await todos.send({ type: "TOGGLE", id: 123 });
+// await todos.send({ type: "TYPO" }); // TypeScript error!
+```
+
+```typescript
+// Async handlers work too
+type ApiSchemas = {
+  FETCH: { type: "FETCH"; url: string };
+  CLEAR: { type: "CLEAR" };
+};
+
+const api = createTypedStateActor<ApiSchemas, { data: unknown }>(
+  { data: null },
+  {
+    FETCH: async (msg, state) => {
+      const res = await fetch(msg.url);
+      return { data: await res.json() };
+    },
+    CLEAR: (_, state) => ({ data: null }),
+  }
+);
+```
+
+---
+
+### `createTypedActor(options)`
+
+Creates an actor with exhaustive message handling and full control over response/reducer.
+
+This is the full-featured version of `createTypedStateActor`, allowing you to:
+- Return rich response data from handlers (different from state type)
+- Use a reducer to extract state updates from responses
+- Handle errors with `onError` callback
+
+```typescript
+function createTypedActor<TSchemas extends MessageSchemas, TState, TResponse>(
+  options: TypedActorOptions<TSchemas, TState, TResponse>
+): Actor<TState, MessageUnion<TSchemas>, TResponse>
+```
+
+**Type Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `TSchemas` | Object mapping message keys to their types |
+| `TState` | The actor's state type |
+| `TResponse` | The response type returned by handlers |
+
+**Parameters:**
+
+| Name | Type | Description |
+|------|------|-------------|
+| `options` | `TypedActorOptions<TSchemas, TState, TResponse>` | Configuration options |
+
+**Returns:** `Actor<TState, MessageUnion<TSchemas>, TResponse>`
+
+**Example:**
+
+```typescript
+type Schemas = {
+  PROCESS: { type: "PROCESS"; data: string };
+  RESET: { type: "RESET" };
+};
+
+// Handler returns { result, metadata }, but state only stores result
+const processor = createTypedActor<
+  Schemas,
+  { result: string | null },
+  { result: string; metadata: { processedAt: number } }
+>({
+  initialState: { result: null },
+  handlers: {
+    PROCESS: (msg, state) => ({
+      result: msg.data.toUpperCase(),
+      metadata: { processedAt: Date.now() }
+    }),
+    RESET: (_, state) => ({ result: "", metadata: { processedAt: 0 } }),
+  },
+  reducer: (state, response) => ({ result: response.result }),
+});
+
+const response = await processor.send({ type: "PROCESS", data: "hello" });
+// response = { result: "HELLO", metadata: { processedAt: 1701234567890 } }
+// state = { result: "HELLO" }
+```
+
+---
+
+### `createMessageFactory()`
+
+Creates a DTOKit factory for validating messages from external sources.
+
+Use this when messages arrive from untyped sources (WebSocket, postMessage, API responses) and need runtime validation before being sent to the actor.
+
+```typescript
+function createMessageFactory<TSchemas extends MessageSchemas>(): DtoFactory<TSchemas, "type">
+```
+
+**Type Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `TSchemas` | The message schemas type |
+
+**Returns:** `DtoFactory<TSchemas, "type">` with `parse()`, `is()`, `getId()`, and `isValid()` methods
+
+**Example:**
+
+```typescript
+type Schemas = {
+  INC: { type: "INC" };
+  ADD: { type: "ADD"; amount: number };
+};
+
+const factory = createMessageFactory<Schemas>();
+const actor = createTypedStateActor<Schemas, number>(0, { ... });
+
+// WebSocket message handling
+socket.onmessage = (event) => {
+  const msg = factory.parse(JSON.parse(event.data));
+  if (msg) {
+    actor.send(msg); // Type-safe after validation!
+  }
+};
+
+// Factory methods
+factory.isValid({ type: "INC" });           // true
+factory.isValid({ type: "UNKNOWN" });       // false
+factory.getId({ type: "ADD", amount: 5 });  // "ADD"
+factory.parse({ type: "ADD", amount: 5 });  // { type: "ADD", amount: 5 } (typed)
+factory.parse({ type: "BAD" });             // undefined
 ```
 
 ---
@@ -418,3 +626,90 @@ type MessageCreator<TPayload, TMessage> = TPayload extends undefined
   ? () => TMessage
   : (payload: TPayload) => TMessage;
 ```
+
+---
+
+## DTOKit Types
+
+### `MessageSchemas`
+
+A schema object where each key maps to a message type with a literal discriminator.
+
+The key MUST match the discriminator value for proper exhaustive checking.
+
+```typescript
+type MessageSchemas = Record<string, { type: string }>;
+```
+
+**Example:**
+
+```typescript
+type CounterSchemas = {
+  INC: { type: "INC" };
+  DEC: { type: "DEC" };
+  ADD: { type: "ADD"; amount: number };
+};
+```
+
+---
+
+### `MessageUnion<TSchemas>`
+
+Extracts the union of all message types from a schemas object.
+
+```typescript
+type MessageUnion<TSchemas extends MessageSchemas> = TSchemas[keyof TSchemas];
+```
+
+**Example:**
+
+```typescript
+type Schemas = { INC: { type: "INC" }; DEC: { type: "DEC" } };
+type Message = MessageUnion<Schemas>;
+// = { type: "INC" } | { type: "DEC" }
+```
+
+---
+
+### `ExhaustiveHandlers<TSchemas, TState, TResult>`
+
+Exhaustive handler mapping for typed actors.
+
+Each handler receives:
+- `msg`: The correctly-typed message for that discriminator value
+- `state`: The current actor state
+
+And returns the result (or Promise of result).
+
+TypeScript enforces that ALL schema keys have handlers - missing any handler causes a compile-time error.
+
+```typescript
+type ExhaustiveHandlers<TSchemas extends MessageSchemas, TState, TResult> = {
+  [K in keyof TSchemas]: (
+    msg: TSchemas[K],
+    state: TState
+  ) => TResult | Promise<TResult>;
+};
+```
+
+---
+
+### `TypedActorOptions<TSchemas, TState, TResponse>`
+
+Configuration options for `createTypedActor`.
+
+```typescript
+interface TypedActorOptions<TSchemas extends MessageSchemas, TState, TResponse> {
+  initialState: TState;
+  handlers: ExhaustiveHandlers<TSchemas, TState, TResponse>;
+  reducer?: (state: TState, response: TResponse) => TState;
+  onError?: (error: Error, message: MessageUnion<TSchemas>) => void;
+}
+```
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `initialState` | `TState` | Yes | The initial state of the actor |
+| `handlers` | `ExhaustiveHandlers<TSchemas, TState, TResponse>` | Yes | Exhaustive handlers for each message type. Each handler receives `(msg, state)` and returns `TResponse`. |
+| `reducer` | `(state: TState, response: TResponse) => TState` | No | Transforms handler response into new state. When omitted, state is not automatically updated. |
+| `onError` | `(error: Error, message: MessageUnion<TSchemas>) => void` | No | Error handler called when a message handler throws. |

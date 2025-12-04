@@ -3,7 +3,7 @@
 ## Package Identity
 
 - **Name**: `@marianmeres/actor`
-- **Version**: 1.0.0
+- **Version**: 1.1.0
 - **Type**: Library
 - **Runtime**: Deno, Node.js, Browser
 - **Language**: TypeScript
@@ -40,19 +40,20 @@ send(message) -> mailbox.enqueue -> processMailbox -> handler(state, message) ->
 
 ```
 src/
-├── mod.ts          # Entry point, re-exports from actor.ts
-└── actor.ts        # Core implementation (~490 lines)
+├── mod.ts           # Entry point, re-exports from actor.ts and with-dtokit.ts
+├── actor.ts         # Core implementation (~490 lines)
+└── with-dtokit.ts   # DTOKit integration for exhaustive handlers (~320 lines)
 
 tests/
-└── actor.test.ts   # Test suite (~530 lines, 26 tests)
+└── actor.test.ts    # Test suite (~815 lines, 38 tests)
 
 scripts/
-└── build-npm.ts    # NPM build script
+└── build-npm.ts     # NPM build script
 ```
 
 ## Public API
 
-### Factory Functions
+### Core Factory Functions (actor.ts)
 
 #### `createActor<TState, TMessage, TResponse>(options)`
 - **Purpose**: Creates a full-featured actor with reducer support
@@ -79,6 +80,33 @@ scripts/
   - Without payload: `defineMessage<TType>(type)` → `() => { type: TType }`
   - With payload: `defineMessage<TType, TPayload>(type)` → `(payload) => { type: TType; payload: TPayload }`
 
+### DTOKit Integration Functions (with-dtokit.ts)
+
+#### `createTypedStateActor<TSchemas, TState>(initialState, handlers)`
+- **Purpose**: State actor with compile-time exhaustive message handling
+- **Location**: `src/with-dtokit.ts:168-180`
+- **Parameters**:
+  - `initialState: TState` - Initial state
+  - `handlers: ExhaustiveHandlers<TSchemas, TState, TState>` - Handler for each message type
+- **Returns**: `Actor<TState, MessageUnion<TSchemas>, TState>`
+- **Key benefit**: TypeScript errors if any message type handler is missing
+
+#### `createTypedActor<TSchemas, TState, TResponse>(options)`
+- **Purpose**: Full-featured typed actor with reducer and error handling
+- **Location**: `src/with-dtokit.ts:266-285`
+- **Parameters**:
+  - `options.initialState: TState`
+  - `options.handlers: ExhaustiveHandlers<TSchemas, TState, TResponse>`
+  - `options.reducer?: (state, response) => TState`
+  - `options.onError?: (error, message) => void`
+- **Returns**: `Actor<TState, MessageUnion<TSchemas>, TResponse>`
+
+#### `createMessageFactory<TSchemas>()`
+- **Purpose**: DTOKit factory for runtime message validation
+- **Location**: `src/with-dtokit.ts:315-319`
+- **Returns**: `DtoFactory<TSchemas, "type">` with `parse()`, `is()`, `getId()`, `isValid()` methods
+- **Use case**: Validating messages from WebSocket, postMessage, API responses
+
 ### Actor Interface Methods
 
 #### `send(message): Promise<TResponse>`
@@ -102,6 +130,7 @@ scripts/
 ### Types
 
 ```typescript
+// Core types (actor.ts)
 type MessageHandler<TState, TMessage, TResponse = void> =
   (state: TState, message: TMessage) => TResponse | Promise<TResponse>;
 
@@ -129,12 +158,29 @@ interface ActorOptions<TState, TMessage, TResponse> {
 type MessageCreator<TPayload, TMessage> = TPayload extends undefined
   ? () => TMessage
   : (payload: TPayload) => TMessage;
+
+// DTOKit types (with-dtokit.ts)
+type MessageSchemas = Record<string, { type: string }>;
+
+type MessageUnion<TSchemas extends MessageSchemas> = TSchemas[keyof TSchemas];
+
+type ExhaustiveHandlers<TSchemas extends MessageSchemas, TState, TResult> = {
+  [K in keyof TSchemas]: (msg: TSchemas[K], state: TState) => TResult | Promise<TResult>;
+};
+
+interface TypedActorOptions<TSchemas extends MessageSchemas, TState, TResponse> {
+  initialState: TState;
+  handlers: ExhaustiveHandlers<TSchemas, TState, TResponse>;
+  reducer?: (state: TState, response: TResponse) => TState;
+  onError?: (error: Error, message: MessageUnion<TSchemas>) => void;
+}
 ```
 
 ## Dependencies
 
 ### Runtime
-- `@marianmeres/pubsub` (^2.4.1) - Internal subscription management
+- `@marianmeres/pubsub` (^2.4.4) - Internal subscription management
+- `@marianmeres/dtokit` (^1.0.4) - Exhaustive type checking for typed actors
 
 ### Development
 - `@marianmeres/npmbuild` - NPM build tooling
@@ -149,13 +195,16 @@ type MessageCreator<TPayload, TMessage> = TPayload extends undefined
 deno test
 
 # Run tests with watch mode
-deno task test
+deno task test:watch
 
 # Build for NPM
 deno task npm:build
 
 # Publish to NPM
 deno task npm:publish
+
+# Release (JSR + NPM)
+deno task publish
 ```
 
 ## Common Patterns
@@ -166,6 +215,21 @@ const counter = createStateActor<number, { type: "INC" } | { type: "DEC" }>(
   0,
   (state, msg) => msg.type === "INC" ? state + 1 : state - 1
 );
+```
+
+### Typed Counter (Exhaustive)
+```typescript
+type Schemas = {
+  INC: { type: "INC" };
+  DEC: { type: "DEC" };
+  ADD: { type: "ADD"; amount: number };
+};
+
+const counter = createTypedStateActor<Schemas, number>(0, {
+  INC: (_, state) => state + 1,
+  DEC: (_, state) => state - 1,
+  ADD: (msg, state) => state + msg.amount,
+});
 ```
 
 ### Form State Actor
@@ -190,6 +254,16 @@ const fetcher = createActor<DataState, FetchMessage, DataState>({
 });
 ```
 
+### External Message Validation
+```typescript
+const factory = createMessageFactory<Schemas>();
+
+socket.onmessage = (event) => {
+  const msg = factory.parse(JSON.parse(event.data));
+  if (msg) actor.send(msg);
+};
+```
+
 ## Key Behaviors
 
 1. **Sequential Processing**: Messages are always processed one at a time, in order
@@ -198,12 +272,22 @@ const fetcher = createActor<DataState, FetchMessage, DataState>({
 4. **Immediate Emission**: subscribe() calls the callback immediately with current state
 5. **Graceful Destruction**: destroy() clears mailbox and rejects pending sends
 6. **Async Support**: Handlers can be sync or async (Promise-returning)
+7. **Exhaustive Handling**: Typed actors enforce handlers for all message types at compile-time
 
 ## Testing
 
-- 26 tests covering all functionality
-- Test categories: Core, Subscriptions, Error Handling, Destroy, Counter Example, Form Example, Concurrency
+- 38 tests covering all functionality
+- Test categories: Core, Subscriptions, Error Handling, Destroy, Counter Example, Form Example, Concurrency, DTOKit Integration
 - Uses Deno's native test framework
+
+## Design Philosophy
+
+This library implements a **single-actor pattern** intentionally:
+- No actor addresses, hierarchies, or spawning
+- Each actor is self-contained
+- Focuses on serialized message processing with encapsulated state
+
+For distributed actor systems, consider Erlang/Elixir OTP, Akka, or xstate.
 
 ## Use Cases
 
@@ -215,6 +299,7 @@ const fetcher = createActor<DataState, FetchMessage, DataState>({
 - Background task queues
 - Undo/redo stacks
 - Game state machines
+- Event sourcing patterns
 
 **Not recommended:**
 - Simple component state (use signals/stores)

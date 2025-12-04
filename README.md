@@ -8,12 +8,11 @@ A lightweight, type-safe Actor Model implementation for TypeScript/JavaScript.
 ## What is an Actor?
 
 An actor is a message-driven stateful computation unit. It processes messages sequentially
-through a mailbox, ensuring thread-safe state mutations without locks or complex
-synchronization.
+through a mailbox, ensuring safe state mutations without complex async coordination.
 
 **Key benefits:**
 - **Sequential processing**: Messages are queued and processed one at a time (FIFO)
-- **No race conditions**: Concurrent sends are serialized automatically
+- **No async race conditions**: Concurrent sends are serialized automatically
 - **Reactive subscriptions**: Subscribe to state changes
 - **Error isolation**: Handler errors don't break the mailbox
 - **Framework-agnostic**: Works with any UI framework or Node.js
@@ -149,7 +148,7 @@ A focused, lightweight primitive for the most common use case: **serialized mess
 processing with encapsulated state**. Each actor is self-contained and handles:
 
 - Sequential (FIFO) message processing via mailbox
-- Thread-safe state mutations without locks
+- Safe state mutations without complex async coordination
 - Reactive subscriptions for state changes
 - Error isolation within the handler
 

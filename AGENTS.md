@@ -57,20 +57,23 @@ scripts/
 
 #### `createActor<TState, TMessage, TResponse>(options)`
 - **Purpose**: Creates a full-featured actor with reducer support
-- **Location**: `src/actor.ts:286-365`
+- **Location**: `src/actor.ts:345-444`
 - **Parameters**:
   - `options.initialState: TState` - Initial state
   - `options.handler: (state, message) => TResponse | Promise<TResponse>` - Message processor
   - `options.reducer?: (state, response) => TState` - State transformer
   - `options.onError?: (error, message) => void` - Error callback
+  - `options.debug?: boolean` - Enable debug logging (default: false)
+  - `options.logger?: Logger` - Custom logger (falls back to console)
 - **Returns**: `Actor<TState, TMessage, TResponse>`
 
-#### `createStateActor<TState, TMessage>(initialState, handler)`
+#### `createStateActor<TState, TMessage>(initialState, handler, options?)`
 - **Purpose**: Simplified actor where handler returns new state directly
-- **Location**: `src/actor.ts:410-419`
+- **Location**: `src/actor.ts:500-512`
 - **Parameters**:
   - `initialState: TState` - Initial state
   - `handler: (state, message) => TState | Promise<TState>` - State transformer
+  - `options?: { debug?: boolean; logger?: Logger }` - Optional debug logging configuration
 - **Returns**: `Actor<TState, TMessage, TState>`
 
 #### `defineMessage<TType, TPayload?>(type)`
@@ -82,23 +85,26 @@ scripts/
 
 ### DTOKit Integration Functions (with-dtokit.ts)
 
-#### `createTypedStateActor<TSchemas, TState>(initialState, handlers)`
+#### `createTypedStateActor<TSchemas, TState>(initialState, handlers, options?)`
 - **Purpose**: State actor with compile-time exhaustive message handling
-- **Location**: `src/with-dtokit.ts:168-180`
+- **Location**: `src/with-dtokit.ts:184-198`
 - **Parameters**:
   - `initialState: TState` - Initial state
   - `handlers: ExhaustiveHandlers<TSchemas, TState, TState>` - Handler for each message type
+  - `options?: { debug?: boolean; logger?: Logger }` - Optional debug logging configuration
 - **Returns**: `Actor<TState, MessageUnion<TSchemas>, TState>`
 - **Key benefit**: TypeScript errors if any message type handler is missing
 
 #### `createTypedActor<TSchemas, TState, TResponse>(options)`
 - **Purpose**: Full-featured typed actor with reducer and error handling
-- **Location**: `src/with-dtokit.ts:266-285`
+- **Location**: `src/with-dtokit.ts:289-310`
 - **Parameters**:
   - `options.initialState: TState`
   - `options.handlers: ExhaustiveHandlers<TSchemas, TState, TResponse>`
   - `options.reducer?: (state, response) => TState`
   - `options.onError?: (error, message) => void`
+  - `options.debug?: boolean` - Enable debug logging (default: false)
+  - `options.logger?: Logger` - Custom logger (falls back to console)
 - **Returns**: `Actor<TState, MessageUnion<TSchemas>, TResponse>`
 
 #### `createMessageFactory<TSchemas>()`
@@ -131,6 +137,13 @@ scripts/
 
 ```typescript
 // Core types (actor.ts)
+interface Logger {
+  debug: (...args: any[]) => any;
+  log: (...args: any[]) => any;
+  warn: (...args: any[]) => any;
+  error: (...args: any[]) => any;
+}
+
 type MessageHandler<TState, TMessage, TResponse = void> =
   (state: TState, message: TMessage) => TResponse | Promise<TResponse>;
 
@@ -153,6 +166,8 @@ interface ActorOptions<TState, TMessage, TResponse> {
   handler: MessageHandler<TState, TMessage, TResponse>;
   reducer?: StateReducer<TState, TResponse>;
   onError?: (error: Error, message: TMessage) => void;
+  debug?: boolean;
+  logger?: Logger;
 }
 
 type MessageCreator<TPayload, TMessage> = TPayload extends undefined
@@ -173,6 +188,8 @@ interface TypedActorOptions<TSchemas extends MessageSchemas, TState, TResponse> 
   handlers: ExhaustiveHandlers<TSchemas, TState, TResponse>;
   reducer?: (state: TState, response: TResponse) => TState;
   onError?: (error: Error, message: MessageUnion<TSchemas>) => void;
+  debug?: boolean;
+  logger?: Logger;
 }
 ```
 
@@ -273,11 +290,12 @@ socket.onmessage = (event) => {
 5. **Graceful Destruction**: destroy() clears mailbox and rejects pending sends
 6. **Async Support**: Handlers can be sync or async (Promise-returning)
 7. **Exhaustive Handling**: Typed actors enforce handlers for all message types at compile-time
+8. **Debug Logging**: Optional `debug` flag enables verbose logging via custom `Logger` or console
 
 ## Testing
 
-- 38 tests covering all functionality
-- Test categories: Core, Subscriptions, Error Handling, Destroy, Counter Example, Form Example, Concurrency, DTOKit Integration
+- 44 tests covering all functionality
+- Test categories: Core, Subscriptions, Error Handling, Destroy, Counter Example, Form Example, Concurrency, DTOKit Integration, Debug Logging
 - Uses Deno's native test framework
 
 ## Design Philosophy

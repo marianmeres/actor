@@ -11,7 +11,12 @@
 // ============================================================================
 
 import { createDtoFactory, type DtoFactory } from "@marianmeres/dtokit";
-import { createActor, createStateActor, type Actor } from "./actor.ts";
+import {
+	createActor,
+	createStateActor,
+	type Actor,
+	type Logger,
+} from "./actor.ts";
 
 /**
  * A schema object where each key maps to a message type with a literal discriminator.
@@ -117,6 +122,7 @@ export type ExhaustiveHandlers<
  *
  * @param initialState - The initial state of the actor
  * @param handlers - Object with handler for each message type (exhaustive)
+ * @param options - Optional configuration for debug logging
  * @returns An Actor instance
  *
  * @example
@@ -164,10 +170,21 @@ export type ExhaustiveHandlers<
  *   }
  * );
  * ```
+ *
+ * @example
+ * ```typescript
+ * // With debug logging
+ * const counter = createTypedStateActor<Schemas, number>(
+ *   0,
+ *   { INC: (_, s) => s + 1, DEC: (_, s) => s - 1 },
+ *   { debug: true }
+ * );
+ * ```
  */
 export function createTypedStateActor<TSchemas extends MessageSchemas, TState>(
 	initialState: TState,
-	handlers: ExhaustiveHandlers<TSchemas, TState, TState>
+	handlers: ExhaustiveHandlers<TSchemas, TState, TState>,
+	options?: { debug?: boolean; logger?: Logger }
 ): Actor<TState, MessageUnion<TSchemas>, TState> {
 	return createStateActor<TState, MessageUnion<TSchemas>>(
 		initialState,
@@ -175,7 +192,8 @@ export function createTypedStateActor<TSchemas extends MessageSchemas, TState>(
 			const handler = handlers[msg.type as keyof TSchemas];
 			// deno-lint-ignore no-explicit-any
 			return handler(msg as any, state);
-		}
+		},
+		options
 	);
 }
 
@@ -215,6 +233,24 @@ export interface TypedActorOptions<
 	 * Optional error handler called when a message handler throws.
 	 */
 	onError?: (error: Error, message: MessageUnion<TSchemas>) => void;
+
+	/**
+	 * Enable debug logging for this actor.
+	 *
+	 * When true, logs important actor lifecycle events and message processing
+	 * to the provided logger (or console if no logger specified).
+	 *
+	 * @default false
+	 */
+	debug?: boolean;
+
+	/**
+	 * Custom logger to use for debug output.
+	 *
+	 * Must implement the Logger interface (debug, log, warn, error methods).
+	 * Falls back to console if not provided.
+	 */
+	logger?: Logger;
 }
 
 /**
@@ -270,7 +306,7 @@ export function createTypedActor<
 >(
 	options: TypedActorOptions<TSchemas, TState, TResponse>
 ): Actor<TState, MessageUnion<TSchemas>, TResponse> {
-	const { initialState, handlers, reducer, onError } = options;
+	const { initialState, handlers, reducer, onError, debug, logger } = options;
 
 	return createActor<TState, MessageUnion<TSchemas>, TResponse>({
 		initialState,
@@ -281,6 +317,8 @@ export function createTypedActor<
 		},
 		reducer,
 		onError,
+		debug,
+		logger,
 	});
 }
 

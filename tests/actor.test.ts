@@ -862,3 +862,302 @@ Deno.test("createMessageFactory", async (t) => {
 		}
 	});
 });
+
+// ============================================================================
+// Debug Logging Tests
+// ============================================================================
+
+Deno.test("Debug Logging", async (t) => {
+	await t.step("uses custom logger when debug enabled", async () => {
+		const logs: string[] = [];
+		const customLogger = {
+			// deno-lint-ignore no-explicit-any
+			debug: (...args: any[]) => {
+				logs.push(`debug: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			log: (...args: any[]) => {
+				logs.push(`log: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			warn: (...args: any[]) => {
+				logs.push(`warn: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			error: (...args: any[]) => {
+				logs.push(`error: ${args.join(" ")}`);
+				return "";
+			},
+		};
+
+		const counter = createStateActor<number, { type: "INC" }>(
+			0,
+			(state, _) => state + 1,
+			{ debug: true, logger: customLogger }
+		);
+
+		await counter.send({ type: "INC" });
+		counter.destroy();
+
+		// Verify logs contain expected entries
+		assertEquals(
+			logs.some((l) => l.includes("created")),
+			true
+		);
+		assertEquals(
+			logs.some((l) => l.includes("send")),
+			true
+		);
+		assertEquals(
+			logs.some((l) => l.includes("processing")),
+			true
+		);
+		assertEquals(
+			logs.some((l) => l.includes("processed")),
+			true
+		);
+		assertEquals(
+			logs.some((l) => l.includes("state changed")),
+			true
+		);
+		assertEquals(
+			logs.some((l) => l.includes("destroyed")),
+			true
+		);
+	});
+
+	await t.step("no logging when debug is false", async () => {
+		const logs: string[] = [];
+		const customLogger = {
+			// deno-lint-ignore no-explicit-any
+			debug: (...args: any[]) => {
+				logs.push(`debug: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			log: (...args: any[]) => {
+				logs.push(`log: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			warn: (...args: any[]) => {
+				logs.push(`warn: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			error: (...args: any[]) => {
+				logs.push(`error: ${args.join(" ")}`);
+				return "";
+			},
+		};
+
+		const counter = createStateActor<number, { type: "INC" }>(
+			0,
+			(state, _) => state + 1,
+			{ debug: false, logger: customLogger }
+		);
+
+		await counter.send({ type: "INC" });
+		counter.destroy();
+
+		assertEquals(logs.length, 0);
+	});
+
+	await t.step("logs subscription and unsubscription", async () => {
+		const logs: string[] = [];
+		const customLogger = {
+			// deno-lint-ignore no-explicit-any
+			debug: (...args: any[]) => {
+				logs.push(`debug: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			log: (...args: any[]) => {
+				logs.push(`log: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			warn: (...args: any[]) => {
+				logs.push(`warn: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			error: (...args: any[]) => {
+				logs.push(`error: ${args.join(" ")}`);
+				return "";
+			},
+		};
+
+		const counter = createStateActor<number, { type: "INC" }>(
+			0,
+			(state, _) => state + 1,
+			{ debug: true, logger: customLogger }
+		);
+
+		const unsubscribe = counter.subscribe(() => {});
+		unsubscribe();
+
+		assertEquals(
+			logs.some((l) => l.includes("subscribed")),
+			true
+		);
+		assertEquals(
+			logs.some((l) => l.includes("unsubscribed")),
+			true
+		);
+
+		counter.destroy();
+	});
+
+	await t.step("logs errors", async () => {
+		const logs: string[] = [];
+		const customLogger = {
+			// deno-lint-ignore no-explicit-any
+			debug: (...args: any[]) => {
+				logs.push(`debug: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			log: (...args: any[]) => {
+				logs.push(`log: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			warn: (...args: any[]) => {
+				logs.push(`warn: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			error: (...args: any[]) => {
+				logs.push(`error: ${args.join(" ")}`);
+				return "";
+			},
+		};
+
+		const actor = createActor<null, string, void>({
+			initialState: null,
+			handler: () => {
+				throw new Error("Test error");
+			},
+			debug: true,
+			logger: customLogger,
+		});
+
+		try {
+			await actor.send("test");
+		} catch {
+			// Expected
+		}
+
+		assertEquals(
+			logs.some((l) => l.includes("error") && l.includes("Test error")),
+			true
+		);
+
+		actor.destroy();
+	});
+
+	await t.step("works with createTypedStateActor", async () => {
+		const logs: string[] = [];
+		const customLogger = {
+			// deno-lint-ignore no-explicit-any
+			debug: (...args: any[]) => {
+				logs.push(`debug: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			log: (...args: any[]) => {
+				logs.push(`log: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			warn: (...args: any[]) => {
+				logs.push(`warn: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			error: (...args: any[]) => {
+				logs.push(`error: ${args.join(" ")}`);
+				return "";
+			},
+		};
+
+		const counter = createTypedStateActor<CounterSchemas, number>(
+			0,
+			{
+				INC: (_, state) => state + 1,
+				DEC: (_, state) => state - 1,
+				ADD: (msg, state) => state + msg.amount,
+				RESET: () => 0,
+			},
+			{ debug: true, logger: customLogger }
+		);
+
+		await counter.send({ type: "INC" });
+		counter.destroy();
+
+		assertEquals(
+			logs.some((l) => l.includes("created")),
+			true
+		);
+		assertEquals(
+			logs.some((l) => l.includes("send")),
+			true
+		);
+	});
+
+	await t.step("works with createTypedActor", async () => {
+		const logs: string[] = [];
+		const customLogger = {
+			// deno-lint-ignore no-explicit-any
+			debug: (...args: any[]) => {
+				logs.push(`debug: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			log: (...args: any[]) => {
+				logs.push(`log: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			warn: (...args: any[]) => {
+				logs.push(`warn: ${args.join(" ")}`);
+				return "";
+			},
+			// deno-lint-ignore no-explicit-any
+			error: (...args: any[]) => {
+				logs.push(`error: ${args.join(" ")}`);
+				return "";
+			},
+		};
+
+		type TestSchemas = {
+			PROCESS: { type: "PROCESS"; value: number };
+		};
+
+		const actor = createTypedActor<TestSchemas, number, number>({
+			initialState: 0,
+			handlers: {
+				PROCESS: (msg, state) => state + msg.value,
+			},
+			reducer: (_, response) => response,
+			debug: true,
+			logger: customLogger,
+		});
+
+		await actor.send({ type: "PROCESS", value: 5 });
+		actor.destroy();
+
+		assertEquals(
+			logs.some((l) => l.includes("created")),
+			true
+		);
+		assertEquals(
+			logs.some((l) => l.includes("send")),
+			true
+		);
+	});
+});

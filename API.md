@@ -6,15 +6,16 @@ Complete API documentation for `@marianmeres/actor`.
 
 - [Factory Functions](#factory-functions)
   - [createActor](#createactoroptions)
-  - [createStateActor](#createstateactorinitialstate-handler)
+  - [createStateActor](#createstateactorinitialstate-handler-options)
   - [defineMessage](#definemessagetype)
 - [DTOKit Integration](#dtokit-integration)
-  - [createTypedStateActor](#createtypedstateactorinitialstate-handlers)
+  - [createTypedStateActor](#createtypedstateactorinitialstate-handlers-options)
   - [createTypedActor](#createtypedactoroptions)
   - [createMessageFactory](#createmessagefactory)
 - [Types](#types)
   - [Actor](#actortstate-tmessage-tresponse)
   - [ActorOptions](#actoroptionsststate-tmessage-tresponse)
+  - [Logger](#logger)
   - [MessageHandler](#messagehandlertstate-tmessage-tresponse)
   - [StateReducer](#statereducertstate-tresponse)
   - [Subscriber](#subscribertstate)
@@ -88,7 +89,7 @@ const fetcher = createActor<
 
 ---
 
-### `createStateActor(initialState, handler)`
+### `createStateActor(initialState, handler, options?)`
 
 Creates a simplified actor where the handler directly returns the new state.
 
@@ -97,7 +98,8 @@ This is a convenience wrapper around `createActor` for the common case where the
 ```typescript
 function createStateActor<TState, TMessage>(
   initialState: TState,
-  handler: (state: TState, message: TMessage) => TState | Promise<TState>
+  handler: (state: TState, message: TMessage) => TState | Promise<TState>,
+  options?: { debug?: boolean; logger?: Logger }
 ): Actor<TState, TMessage, TState>
 ```
 
@@ -114,6 +116,7 @@ function createStateActor<TState, TMessage>(
 |------|------|-------------|
 | `initialState` | `TState` | The initial state |
 | `handler` | `(state: TState, message: TMessage) => TState \| Promise<TState>` | Function that receives state and message, returns new state |
+| `options` | `{ debug?: boolean; logger?: Logger }` | Optional configuration for debug logging |
 
 **Returns:** `Actor<TState, TMessage, TState>`
 
@@ -206,7 +209,7 @@ await user.send(setName("Alice"));    // { type: "SET_NAME", payload: "Alice" }
 
 These functions provide compile-time exhaustive message handling using [@marianmeres/dtokit](https://github.com/marianmeres/dtokit). TypeScript will error if you forget to handle any message type.
 
-### `createTypedStateActor(initialState, handlers)`
+### `createTypedStateActor(initialState, handlers, options?)`
 
 Creates a state actor with compile-time exhaustive message handling.
 
@@ -215,7 +218,8 @@ This is the recommended way to create actors when you have multiple message type
 ```typescript
 function createTypedStateActor<TSchemas extends MessageSchemas, TState>(
   initialState: TState,
-  handlers: ExhaustiveHandlers<TSchemas, TState, TState>
+  handlers: ExhaustiveHandlers<TSchemas, TState, TState>,
+  options?: { debug?: boolean; logger?: Logger }
 ): Actor<TState, MessageUnion<TSchemas>, TState>
 ```
 
@@ -232,6 +236,7 @@ function createTypedStateActor<TSchemas extends MessageSchemas, TState>(
 |------|------|-------------|
 | `initialState` | `TState` | The initial state of the actor |
 | `handlers` | `ExhaustiveHandlers<TSchemas, TState, TState>` | Object with handler for each message type (exhaustive) |
+| `options` | `{ debug?: boolean; logger?: Logger }` | Optional configuration for debug logging |
 
 **Returns:** `Actor<TState, MessageUnion<TSchemas>, TState>`
 
@@ -509,6 +514,8 @@ interface ActorOptions<TState, TMessage, TResponse> {
   handler: MessageHandler<TState, TMessage, TResponse>;
   reducer?: StateReducer<TState, TResponse>;
   onError?: (error: Error, message: TMessage) => void;
+  debug?: boolean;
+  logger?: Logger;
 }
 ```
 
@@ -518,6 +525,8 @@ interface ActorOptions<TState, TMessage, TResponse> {
 | `handler` | `MessageHandler<TState, TMessage, TResponse>` | Yes | The message handler function. Receives the current state and a message, returns a response. Can be sync or async. |
 | `reducer` | `StateReducer<TState, TResponse>` | No | Transforms handler response into new state. When omitted, state is not automatically updated. |
 | `onError` | `(error: Error, message: TMessage) => void` | No | Called when the message handler throws. The error is still propagated (the `send()` promise will reject), but this callback allows for logging or other side effects. |
+| `debug` | `boolean` | No | Enable debug logging for this actor. Logs lifecycle events and message processing. Default: `false`. |
+| `logger` | `Logger` | No | Custom logger to use for debug output. Falls back to `console` if not provided. |
 
 **Example:**
 
@@ -533,6 +542,36 @@ interface ActorOptions<TState, TMessage, TResponse> {
     console.error(`Failed to process ${message.type}:`, error);
   }
 }
+```
+
+---
+
+### `Logger`
+
+Logger interface compatible with both `console` and `@marianmeres/clog`.
+
+When using a custom logger, it will be used for debug output. Falls back to `console` if not provided.
+
+```typescript
+interface Logger {
+  debug: (...args: any[]) => any;
+  log: (...args: any[]) => any;
+  warn: (...args: any[]) => any;
+  error: (...args: any[]) => any;
+}
+```
+
+**Example:**
+
+```typescript
+import { createClog } from "@marianmeres/clog";
+
+const actor = createActor({
+  initialState: 0,
+  handler: (state, msg) => state + 1,
+  debug: true,
+  logger: createClog("my-actor"),
+});
 ```
 
 ---
@@ -704,6 +743,8 @@ interface TypedActorOptions<TSchemas extends MessageSchemas, TState, TResponse> 
   handlers: ExhaustiveHandlers<TSchemas, TState, TResponse>;
   reducer?: (state: TState, response: TResponse) => TState;
   onError?: (error: Error, message: MessageUnion<TSchemas>) => void;
+  debug?: boolean;
+  logger?: Logger;
 }
 ```
 
@@ -713,3 +754,5 @@ interface TypedActorOptions<TSchemas extends MessageSchemas, TState, TResponse> 
 | `handlers` | `ExhaustiveHandlers<TSchemas, TState, TResponse>` | Yes | Exhaustive handlers for each message type. Each handler receives `(msg, state)` and returns `TResponse`. |
 | `reducer` | `(state: TState, response: TResponse) => TState` | No | Transforms handler response into new state. When omitted, state is not automatically updated. |
 | `onError` | `(error: Error, message: MessageUnion<TSchemas>) => void` | No | Error handler called when a message handler throws. |
+| `debug` | `boolean` | No | Enable debug logging for this actor. Logs lifecycle events and message processing. Default: `false`. |
+| `logger` | `Logger` | No | Custom logger to use for debug output. Falls back to `console` if not provided. |

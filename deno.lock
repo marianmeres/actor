@@ -2,7 +2,7 @@
   "version": "5",
   "specifiers": {
     "jsr:@marianmeres/dtokit@^1.0.4": "1.0.4",
-    "jsr:@marianmeres/npmbuild@^1.6.2": "1.6.2",
+    "jsr:@marianmeres/npmbuild@^1.7.1": "1.7.1",
     "jsr:@marianmeres/pubsub@^2.4.4": "2.4.4",
     "jsr:@std/assert@^1.0.16": "1.0.16",
     "jsr:@std/fs@^1.0.20": "1.0.20",
@@ -13,8 +13,8 @@
     "@marianmeres/dtokit@1.0.4": {
       "integrity": "93abf73992e6e2676403fba02e86b2bfcb3471fc1e1422a447b7a58906800dbe"
     },
-    "@marianmeres/npmbuild@1.6.2": {
-      "integrity": "34a1d1fcadacdb299600dcc97606c9f466df6a41051d18f684b0d04e96eff5bd",
+    "@marianmeres/npmbuild@1.7.1": {
+      "integrity": "9fb2bb5dcb6b8a26064ae2159fe9d773a93012fa1189b711005d0912b597f601",
       "dependencies": [
         "jsr:@std/fs",
         "jsr:@std/path"
@@ -49,7 +49,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@marianmeres/dtokit@^1.0.4",
-      "jsr:@marianmeres/npmbuild@^1.6.2",
+      "jsr:@marianmeres/npmbuild@^1.7.1",
       "jsr:@marianmeres/pubsub@^2.4.4",
       "jsr:@std/assert@^1.0.16",
       "jsr:@std/fs@^1.0.20",

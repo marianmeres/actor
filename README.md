@@ -70,12 +70,14 @@ For complete API documentation, see [API.md](API.md).
 
 | Function | Description |
 |----------|-------------|
-| `createStateActor(initial, handler)` | Simple actor where handler returns the new state |
-| `createActor(options)` | Full control with optional `reducer` and `onError` |
+| `createStateActor(initial, handler, options?)` | Simple actor where handler returns the new state |
+| `createActor(options)` | Full control with optional `reducer`, `onError`, `debug`, `logger` |
 | `defineMessage(type)` | Creates typed message factories (like Redux action creators) |
-| `createTypedStateActor(initial, handlers)` | Exhaustive message handling with compile-time checking |
-| `createTypedActor(options)` | Full control + exhaustive handlers + reducer |
+| `createTypedStateActor(initial, handlers, options?)` | Exhaustive message handling with compile-time checking |
+| `createTypedActor(options)` | Full control + exhaustive handlers + reducer + debug logging |
 | `createMessageFactory()` | DTOKit factory for validating external messages |
+
+All actor factories support optional `debug: true` and custom `logger` for verbose debug logging.
 
 | Actor Method | Description |
 |--------------|-------------|

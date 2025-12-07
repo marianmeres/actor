@@ -86,6 +86,38 @@ All actor factories support optional `debug: true` and custom `logger` for verbo
 | `getState()` | Get current state synchronously |
 | `destroy()` | Clear mailbox and subscribers |
 
+### How `send()` Works: The Deferred Promise Pattern
+
+The `send()` method uses a "deferred promise" pattern internally to bridge the gap between
+when you call `send()` and when your message is actually processed:
+
+```typescript
+send(message) {
+  return new Promise((resolve, reject) => {
+    mailbox.push({ message, resolve, reject });  // Store callbacks with message
+    processMailbox();
+  });
+}
+```
+
+**Why this design?**
+
+1. **Callbacks stored with message**: Each message is queued alongside its own `resolve`/`reject`
+   functions. When `processMailbox` eventually processes this specific message, it can
+   resolve/reject the correct caller's promise.
+
+2. **Non-blocking queue trigger**: `processMailbox()` is called after every push, but has a
+   guard (`if (processing) return`) so it's a no-op when already running. The `while` loop
+   inside ensures all queued messages are processed sequentially before releasing the lock.
+
+3. **Async by design**: Even if your handler is synchronous, `send()` returns a Promise because:
+   - Your message may wait behind others in the queue (FIFO order)
+   - The handler might be async (I/O, network calls)
+   - Callers need to know when *their* message was processed and get the result
+
+This pattern enables the core actor guarantee: **sequential message processing with
+async-friendly callers**.
+
 ### Understanding the Reducer
 
 The `reducer` option separates **what the handler returns** from **how state is updated**.

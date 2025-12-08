@@ -294,8 +294,6 @@ export interface ActorOptions<TState, TMessage, TResponse> {
 
 const STATE_CHANGE_TOPIC = "state";
 
-const _onSubscriberError = (e: Error) => console.error("Subscriber error:", e);
-
 /**
  * Creates an actor - a message-driven stateful computation unit.
  *
@@ -359,7 +357,9 @@ export function createActor<TState, TMessage, TResponse = void>(
 	let destroyed = false;
 
 	const mailbox: QueuedMessage<TMessage, TResponse>[] = [];
-	const pubsub: PubSub = createPubSub({ onError: _onSubscriberError });
+	const pubsub: PubSub = createPubSub({
+		onError: (e: Error) => _logger.error("[actor] Subscriber error:", e),
+	});
 
 	function notifySubscribers() {
 		pubsub.publish(STATE_CHANGE_TOPIC, state);
@@ -391,7 +391,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 			} catch (error) {
 				const err =
 					error instanceof Error ? error : new Error(String(error));
-				_log("error", err.message);
+				_logger.error("[actor] error", err.message);
 				onError?.(err, message);
 				reject(err);
 			}
@@ -422,7 +422,8 @@ export function createActor<TState, TMessage, TResponse = void>(
 			try {
 				fn(state); // Emit current state immediately
 			} catch (e) {
-				_onSubscriberError(
+				_logger.error(
+					"[actor] Subscriber error:",
 					e instanceof Error ? e : new Error(String(e))
 				);
 			}

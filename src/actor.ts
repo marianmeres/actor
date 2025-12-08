@@ -272,7 +272,7 @@ export interface ActorOptions<TState, TMessage, TResponse> {
 	debug?: boolean;
 
 	/**
-	 * Custom logger to use for debug output.
+	 * Custom logger to use for logging output.
 	 *
 	 * Must implement the Logger interface (debug, log, warn, error methods).
 	 * Falls back to console if not provided.
@@ -347,7 +347,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 
 	// Debug logging helper - only logs when debug is enabled
 	const _logger = logger ?? console;
-	const _log = debug
+	const _debugLog = debug
 		? // deno-lint-ignore no-explicit-any
 		  (...args: any[]) => _logger.debug("[actor]", ...args)
 		: () => {};
@@ -373,16 +373,16 @@ export function createActor<TState, TMessage, TResponse = void>(
 			const { message, resolve, reject } = mailbox.shift()!;
 
 			try {
-				_log("processing", message);
+				_debugLog("processing", message);
 				const response = await handler(state, message);
-				_log("processed", response);
+				_debugLog("processed", response);
 
 				// Update state if reducer provided
 				if (reducer) {
 					const newState = reducer(state, response);
 					if (newState !== state) {
 						state = newState;
-						_log("state changed", state);
+						_debugLog("state changed", state);
 						notifySubscribers();
 					}
 				}
@@ -400,7 +400,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 		processing = false;
 	}
 
-	_log("created", initialState);
+	_debugLog("created", initialState);
 
 	return {
 		send(message: TMessage): Promise<TResponse> {
@@ -408,7 +408,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 				return Promise.reject(new Error("Actor has been destroyed"));
 			}
 
-			_log("send", message);
+			_debugLog("send", message);
 
 			return new Promise((resolve, reject) => {
 				mailbox.push({ message, resolve, reject });
@@ -417,7 +417,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 		},
 
 		subscribe(fn: Subscriber<TState>): Unsubscribe {
-			_log("subscribed");
+			_debugLog("subscribed");
 			const unsubscribe = pubsub.subscribe(STATE_CHANGE_TOPIC, fn);
 			try {
 				fn(state); // Emit current state immediately
@@ -428,7 +428,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 				);
 			}
 			return () => {
-				_log("unsubscribed");
+				_debugLog("unsubscribed");
 				unsubscribe();
 			};
 		},
@@ -438,7 +438,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 		},
 
 		destroy() {
-			_log("destroyed");
+			_debugLog("destroyed");
 			destroyed = true;
 			mailbox.length = 0;
 			pubsub.unsubscribeAll();

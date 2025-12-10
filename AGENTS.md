@@ -133,6 +133,14 @@ scripts/
 - **Purpose**: Cleanup actor resources
 - **Behavior**: Clears mailbox, removes subscribers, rejects future sends
 
+#### `debug: boolean | undefined` (readonly)
+- **Purpose**: Access the debug flag value
+- **Behavior**: Returns the debug setting from options, or `undefined` if not specified
+
+#### `logger: Logger` (readonly)
+- **Purpose**: Access the logger instance
+- **Behavior**: Returns custom logger if provided, otherwise returns `console`
+
 ### Types
 
 ```typescript
@@ -159,6 +167,8 @@ interface Actor<TState, TMessage, TResponse = void> {
   subscribe: (fn: Subscriber<TState>) => Unsubscribe;
   getState: () => TState;
   destroy: () => void;
+  readonly debug: boolean | undefined;
+  readonly logger: Logger;
 }
 
 interface ActorOptions<TState, TMessage, TResponse> {

@@ -420,6 +420,8 @@ interface Actor<TState, TMessage, TResponse = void> {
   subscribe: (fn: Subscriber<TState>) => Unsubscribe;
   getState: () => TState;
   destroy: () => void;
+  readonly debug: boolean | undefined;
+  readonly logger: Logger;
 }
 ```
 
@@ -501,6 +503,32 @@ After destruction:
 ```typescript
 destroy(): void
 ```
+
+#### Properties
+
+##### `debug`
+
+The current debug flag value.
+
+Returns the debug setting passed to the actor options, or `undefined` if not specified. Useful for inspecting whether debug logging is enabled.
+
+```typescript
+readonly debug: boolean | undefined
+```
+
+**Returns:** `boolean | undefined` - The debug flag value
+
+##### `logger`
+
+The logger instance used by this actor.
+
+Returns the custom logger if one was provided in options, otherwise returns `console`. Useful for accessing the actor's logger for additional logging or debugging purposes.
+
+```typescript
+readonly logger: Logger
+```
+
+**Returns:** `Logger` - The logger instance (custom or console)
 
 ---
 

@@ -194,6 +194,27 @@ export interface Actor<TState, TMessage, TResponse = void> {
 	 * - The state remains accessible via getState() but will no longer update
 	 */
 	destroy: () => void;
+
+	/**
+	 * The current debug flag value.
+	 *
+	 * Returns the debug setting passed to the actor options, or `undefined` if
+	 * not specified. Useful for inspecting whether debug logging is enabled.
+	 *
+	 * @readonly
+	 */
+	readonly debug: boolean | undefined;
+
+	/**
+	 * The logger instance used by this actor.
+	 *
+	 * Returns the custom logger if one was provided in options, otherwise
+	 * returns `console`. Useful for accessing the actor's logger for
+	 * additional logging or debugging purposes.
+	 *
+	 * @readonly
+	 */
+	readonly logger: Logger;
 }
 
 /**
@@ -442,6 +463,14 @@ export function createActor<TState, TMessage, TResponse = void>(
 			destroyed = true;
 			mailbox.length = 0;
 			pubsub.unsubscribeAll();
+		},
+
+		get logger() {
+			return logger ?? console;
+		},
+
+		get debug() {
+			return debug;
 		},
 	};
 }

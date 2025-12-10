@@ -85,6 +85,8 @@ All actor factories support optional `debug: true` and custom `logger` for verbo
 | `subscribe(fn)` | Subscribe to state changes (called immediately + on change) |
 | `getState()` | Get current state synchronously |
 | `destroy()` | Clear mailbox and subscribers |
+| `debug` | Read-only debug flag value (`boolean \| undefined`) |
+| `logger` | Read-only logger instance (custom or `console`) |
 
 ### How `send()` Works: The Deferred Promise Pattern
 

@@ -176,7 +176,7 @@ Deno.test("notifies subscribers of state changes", async () => {
 	);
 
 	const states: number[] = [];
-	actor.subscribe((state) => states.push(state));
+	actor.subscribe(({ current }) => states.push(current));
 
 	await actor.send({ delta: 1 });
 	await actor.send({ delta: 2 });
@@ -190,8 +190,8 @@ Deno.test("emits current state immediately on subscribe", () => {
 	const actor = createStateActor<number, never>(42, (s) => s);
 
 	let received: number | null = null;
-	actor.subscribe((state) => {
-		received = state;
+	actor.subscribe(({ current }) => {
+		received = current;
 	});
 
 	assertEquals(received, 42);
@@ -201,7 +201,7 @@ Deno.test("allows unsubscribing", async () => {
 	const actor = createStateActor<number, number>(0, (_, msg) => msg);
 
 	const states: number[] = [];
-	const unsubscribe = actor.subscribe((state) => states.push(state));
+	const unsubscribe = actor.subscribe(({ current }) => states.push(current));
 
 	await actor.send(1);
 	unsubscribe();
@@ -231,6 +231,85 @@ Deno.test("handles subscriber errors gracefully", async () => {
 	console.error = originalError;
 });
 
+Deno.test("provides previous state to subscribers", async () => {
+	const actor = createStateActor<number, { delta: number }>(
+		0,
+		(state, msg) => state + msg.delta
+	);
+
+	const history: Array<{ current: number; previous: number | undefined }> = [];
+	actor.subscribe(({ current, previous }) => {
+		history.push({ current, previous });
+	});
+
+	await actor.send({ delta: 5 });
+	await actor.send({ delta: 3 });
+	await actor.send({ delta: -2 });
+
+	assertEquals(history, [
+		{ current: 0, previous: undefined }, // Initial subscription
+		{ current: 5, previous: 0 },
+		{ current: 8, previous: 5 },
+		{ current: 6, previous: 8 },
+	]);
+});
+
+Deno.test("previous state is undefined on initial subscription", () => {
+	const actor = createStateActor<number, never>(42, (s) => s);
+
+	let receivedPrevious: number | undefined = "not-set" as unknown as undefined;
+	actor.subscribe(({ previous }) => {
+		receivedPrevious = previous;
+	});
+
+	assertEquals(receivedPrevious, undefined);
+});
+
+Deno.test("previous state allows detecting specific changes", async () => {
+	interface AppState {
+		count: number;
+		name: string;
+	}
+
+	const actor = createStateActor<
+		AppState,
+		{ type: "INC" } | { type: "SET_NAME"; name: string }
+	>({ count: 0, name: "" }, (state, msg) => {
+		switch (msg.type) {
+			case "INC":
+				return { ...state, count: state.count + 1 };
+			case "SET_NAME":
+				return { ...state, name: msg.name };
+		}
+	});
+
+	const countChanges: Array<{ from: number | undefined; to: number }> = [];
+	const nameChanges: Array<{ from: string | undefined; to: string }> = [];
+
+	actor.subscribe(({ current, previous }) => {
+		if (previous === undefined || current.count !== previous.count) {
+			countChanges.push({ from: previous?.count, to: current.count });
+		}
+		if (previous === undefined || current.name !== previous.name) {
+			nameChanges.push({ from: previous?.name, to: current.name });
+		}
+	});
+
+	await actor.send({ type: "INC" });
+	await actor.send({ type: "SET_NAME", name: "Alice" });
+	await actor.send({ type: "INC" });
+
+	assertEquals(countChanges, [
+		{ from: undefined, to: 0 }, // Initial
+		{ from: 0, to: 1 },
+		{ from: 1, to: 2 },
+	]);
+	assertEquals(nameChanges, [
+		{ from: undefined, to: "" }, // Initial
+		{ from: "", to: "Alice" },
+	]);
+});
+
 Deno.test("does not notify when state reference unchanged", async () => {
 	const actor = createActor<{ count: number }, string, void>({
 		initialState: { count: 0 },
@@ -239,7 +318,7 @@ Deno.test("does not notify when state reference unchanged", async () => {
 	});
 
 	const calls: number[] = [];
-	actor.subscribe((state) => calls.push(state.count));
+	actor.subscribe(({ current }) => calls.push(current.count));
 
 	await actor.send("noop");
 	await actor.send("noop");
@@ -376,7 +455,7 @@ Deno.test("works with subscriptions for reactive updates", async () => {
 	const counter = createCounter(0);
 	const values: number[] = [];
 
-	counter.subscribe((count) => values.push(count));
+	counter.subscribe(({ current }) => values.push(current));
 
 	await counter.send({ type: "INCREMENT" });
 	await counter.send({ type: "INCREMENT" });
@@ -460,7 +539,7 @@ Deno.test("handles submit lifecycle", async () => {
 	const form = createFormActor(["email"]);
 	const states: boolean[] = [];
 
-	form.subscribe((state) => states.push(state.isSubmitting));
+	form.subscribe(({ current }) => states.push(current.isSubmitting));
 
 	await form.send({ type: "SUBMIT" });
 	assertEquals(form.getState().isSubmitting, true);
@@ -615,7 +694,7 @@ Deno.test("subscriptions work", async () => {
 	});
 
 	const values: number[] = [];
-	counter.subscribe((state) => values.push(state));
+	counter.subscribe(({ current }) => values.push(current));
 
 	await counter.send({ type: "INC" });
 	await counter.send({ type: "INC" });

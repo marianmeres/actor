@@ -87,14 +87,40 @@ export type StateReducer<TState, TResponse> = (
 ) => TState;
 
 /**
- * A callback function that receives state updates.
- *
- * Subscribers are called immediately upon subscription with the current state,
- * and subsequently whenever the state changes.
+ * The value passed to subscribers on state changes.
  *
  * @template TState - The type of the actor's state
  */
-export type Subscriber<TState> = (state: TState) => void;
+export type SubscriberValue<TState> = {
+	/** The current state */
+	current: TState;
+	/** The previous state (undefined on initial subscription) */
+	previous?: TState;
+};
+
+/**
+ * A callback function that receives state updates.
+ *
+ * Subscribers are called immediately upon subscription with the current state
+ * (and `undefined` as the previous state), and subsequently whenever the state
+ * changes (with the actual previous state).
+ *
+ * Uses a single object parameter for Svelte store compatibility.
+ *
+ * @template TState - The type of the actor's state
+ *
+ * @example
+ * ```typescript
+ * actor.subscribe(({ current, previous }) => {
+ *   if (previous === undefined) {
+ *     console.log("Initial state:", current);
+ *   } else {
+ *     console.log("State changed from", previous, "to", current);
+ *   }
+ * });
+ * ```
+ */
+export type Subscriber<TState> = (value: SubscriberValue<TState>) => void;
 
 /**
  * A function that removes a subscription when called.
@@ -155,17 +181,23 @@ export interface Actor<TState, TMessage, TResponse = void> {
 	/**
 	 * Subscribes to state changes.
 	 *
-	 * The subscriber is called immediately with the current state, and then
-	 * whenever the state changes. Subscribers are only notified when the state
-	 * reference changes (shallow comparison).
+	 * The subscriber is called immediately with `{ current, previous: undefined }`,
+	 * and then whenever the state changes with `{ current, previous }`.
+	 * Subscribers are only notified when the state reference changes (shallow comparison).
 	 *
-	 * @param fn - Callback function that receives the current state
+	 * Uses a single object parameter for Svelte store compatibility.
+	 *
+	 * @param fn - Callback function that receives `{ current, previous? }`
 	 * @returns An unsubscribe function
 	 *
 	 * @example
 	 * ```typescript
-	 * const unsubscribe = actor.subscribe((state) => {
-	 *   console.log("State changed:", state);
+	 * const unsubscribe = actor.subscribe(({ current, previous }) => {
+	 *   if (previous === undefined) {
+	 *     console.log("Initial state:", current);
+	 *   } else {
+	 *     console.log("State changed from", previous, "to", current);
+	 *   }
 	 * });
 	 *
 	 * // Later, to stop receiving updates:
@@ -382,8 +414,8 @@ export function createActor<TState, TMessage, TResponse = void>(
 		onError: (e: Error) => _logger.error("[actor] Subscriber error:", e),
 	});
 
-	function notifySubscribers() {
-		pubsub.publish(STATE_CHANGE_TOPIC, state);
+	function notifySubscribers(previous: TState) {
+		pubsub.publish(STATE_CHANGE_TOPIC, { current: state, previous });
 	}
 
 	async function processMailbox() {
@@ -402,9 +434,10 @@ export function createActor<TState, TMessage, TResponse = void>(
 				if (reducer) {
 					const newState = reducer(state, response);
 					if (newState !== state) {
+						const previous = state;
 						state = newState;
 						_debugLog("state changed", state);
-						notifySubscribers();
+						notifySubscribers(previous);
 					}
 				}
 
@@ -439,9 +472,10 @@ export function createActor<TState, TMessage, TResponse = void>(
 
 		subscribe(fn: Subscriber<TState>): Unsubscribe {
 			_debugLog("subscribed");
+			// pubsub already receives { current, previous } from notifySubscribers
 			const unsubscribe = pubsub.subscribe(STATE_CHANGE_TOPIC, fn);
 			try {
-				fn(state); // Emit current state immediately
+				fn({ current: state, previous: undefined }); // Emit current state immediately
 			} catch (e) {
 				_logger.error(
 					"[actor] Subscriber error:",

@@ -55,9 +55,9 @@ await counter.send({ type: "ADD", payload: 10 });
 
 console.log(counter.getState()); // 11
 
-// Subscribe to changes
-const unsubscribe = counter.subscribe((state) => {
-  console.log("Counter:", state);
+// Subscribe to changes (with optional previous state, Svelte-compatible)
+const unsubscribe = counter.subscribe(({ current, previous }) => {
+  console.log("Counter:", current, "(was:", previous, ")");
 });
 
 // Cleanup
@@ -82,7 +82,7 @@ All actor factories support optional `debug: true` and custom `logger` for verbo
 | Actor Method | Description |
 |--------------|-------------|
 | `send(msg)` | Queue message, returns `Promise<TResponse>` |
-| `subscribe(fn)` | Subscribe to state changes (called immediately + on change) |
+| `subscribe(fn)` | Subscribe to state changes. Callback receives `{ current, previous? }` - called immediately with `undefined` previous, then on each change with actual previous state. Svelte-compatible single parameter. |
 | `getState()` | Get current state synchronously |
 | `destroy()` | Clear mailbox and subscribers |
 | `debug` | Read-only debug flag value (`boolean \| undefined`) |
@@ -148,6 +148,40 @@ const result = await actor.send("hello");
 
 **Use cases:** async operations returning `{ data, metadata }`, validation returning
 `{ valid, errors }`, side effects returning status while reducer decides what to persist.
+
+### Previous State in Subscribers
+
+Subscribers receive `{ current, previous }` as a single parameter (Svelte-compatible), enabling powerful change detection patterns:
+
+```typescript
+const user = createStateActor<
+  { name: string; email: string; preferences: object },
+  UpdateMessage
+>(initialState, handler);
+
+user.subscribe(({ current, previous }) => {
+  // On initial subscription, previous is undefined
+  if (previous === undefined) {
+    console.log("Initial state loaded");
+    return;
+  }
+
+  // React only to specific property changes
+  if (current.email !== previous.email) {
+    sendEmailVerification(current.email);
+  }
+
+  if (current.preferences !== previous.preferences) {
+    syncPreferencesToServer(current.preferences);
+  }
+});
+```
+
+**Common use cases for previous state:**
+- Conditional side effects (only run when specific fields change)
+- Computing diffs for analytics or debugging
+- Animations/transitions between states
+- Undo/redo without external history tracking
 
 ## When to Use Actors
 

@@ -122,8 +122,9 @@ scripts/
 
 #### `subscribe(fn): Unsubscribe`
 - **Purpose**: Subscribe to state changes
-- **Behavior**: Immediate emission of current state, then on each change
-- **Note**: Uses shallow comparison to detect changes
+- **Behavior**: Immediate emission of `{ current, previous: undefined }`, then on each change `{ current, previous }`
+- **Signature**: `fn: (value: { current: TState; previous?: TState }) => void`
+- **Note**: Uses shallow comparison to detect changes. Single object parameter for Svelte store compatibility.
 
 #### `getState(): TState`
 - **Purpose**: Synchronous state access
@@ -158,7 +159,9 @@ type MessageHandler<TState, TMessage, TResponse = void> =
 type StateReducer<TState, TResponse> =
   (state: TState, response: TResponse) => TState;
 
-type Subscriber<TState> = (state: TState) => void;
+type SubscriberValue<TState> = { current: TState; previous?: TState };
+
+type Subscriber<TState> = (value: SubscriberValue<TState>) => void;
 
 type Unsubscribe = () => void;
 
@@ -297,15 +300,16 @@ socket.onmessage = (event) => {
 2. **Error Isolation**: Handler errors reject the send() promise but don't break the mailbox
 3. **Shallow Comparison**: Subscribers only notified when state reference changes
 4. **Immediate Emission**: subscribe() calls the callback immediately with current state
-5. **Graceful Destruction**: destroy() clears mailbox and rejects pending sends
-6. **Async Support**: Handlers can be sync or async (Promise-returning)
-7. **Exhaustive Handling**: Typed actors enforce handlers for all message types at compile-time
-8. **Debug Logging**: Optional `debug` flag enables verbose logging via custom `Logger` or console
+5. **Previous State Access**: Subscribers receive `{ current, previous? }` - previous is `undefined` on initial call, then actual previous state on changes (Svelte-compatible)
+6. **Graceful Destruction**: destroy() clears mailbox and rejects pending sends
+7. **Async Support**: Handlers can be sync or async (Promise-returning)
+8. **Exhaustive Handling**: Typed actors enforce handlers for all message types at compile-time
+9. **Debug Logging**: Optional `debug` flag enables verbose logging via custom `Logger` or console
 
 ## Testing
 
-- 44 tests covering all functionality
-- Test categories: Core, Subscriptions, Error Handling, Destroy, Counter Example, Form Example, Concurrency, DTOKit Integration, Debug Logging
+- 47 tests covering all functionality
+- Test categories: Core, Subscriptions (including previous state), Error Handling, Destroy, Counter Example, Form Example, Concurrency, DTOKit Integration, Debug Logging
 - Uses Deno's native test framework
 
 ## Design Philosophy

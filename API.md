@@ -18,6 +18,7 @@ Complete API documentation for `@marianmeres/actor`.
   - [Logger](#logger)
   - [MessageHandler](#messagehandlertstate-tmessage-tresponse)
   - [StateReducer](#statereducertstate-tresponse)
+  - [SubscriberValue](#subscribervaluetstate)
   - [Subscriber](#subscribertstate)
   - [Unsubscribe](#unsubscribe)
   - [MessageCreator](#messagecreatorttpayload-tmessage)
@@ -417,7 +418,7 @@ An actor processes messages sequentially through a mailbox, ensuring thread-safe
 ```typescript
 interface Actor<TState, TMessage, TResponse = void> {
   send: (message: TMessage) => Promise<TResponse>;
-  subscribe: (fn: Subscriber<TState>) => Unsubscribe;
+  subscribe: (fn: Subscriber<TState>) => Unsubscribe;  // fn receives (state, previous?)
   getState: () => TState;
   destroy: () => void;
   readonly debug: boolean | undefined;
@@ -455,7 +456,9 @@ const result = await actor.send({ type: "ADD", value: 5 });
 
 Subscribes to state changes.
 
-The subscriber is called immediately with the current state, and then whenever the state changes. Subscribers are only notified when the state reference changes (shallow comparison).
+The subscriber is called immediately with `{ current, previous: undefined }`, and then whenever the state changes with `{ current, previous }`. Subscribers are only notified when the state reference changes (shallow comparison).
+
+Uses a single object parameter for Svelte store compatibility.
 
 ```typescript
 subscribe(fn: Subscriber<TState>): Unsubscribe
@@ -463,19 +466,34 @@ subscribe(fn: Subscriber<TState>): Unsubscribe
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `fn` | `Subscriber<TState>` | Callback function that receives the current state |
+| `fn` | `Subscriber<TState>` | Callback function that receives `{ current, previous? }` |
 
 **Returns:** `Unsubscribe` - A function to remove the subscription
 
 **Example:**
 
 ```typescript
-const unsubscribe = actor.subscribe((state) => {
-  console.log("State changed:", state);
+const unsubscribe = actor.subscribe(({ current, previous }) => {
+  if (previous === undefined) {
+    console.log("Initial state:", current);
+  } else {
+    console.log("State changed from", previous, "to", current);
+  }
 });
 
 // Later, to stop receiving updates:
 unsubscribe();
+```
+
+**Previous State Use Cases:**
+
+```typescript
+// React only to specific property changes
+actor.subscribe(({ current, previous }) => {
+  if (previous && current.email !== previous.email) {
+    sendEmailVerification(current.email);
+  }
+});
 ```
 
 ##### `getState()`
@@ -658,14 +676,43 @@ const reducer: StateReducer<number, { value: number; metadata: object }> =
 
 ---
 
+### `SubscriberValue<TState>`
+
+The value passed to subscribers on state changes.
+
+```typescript
+type SubscriberValue<TState> = {
+  current: TState;
+  previous?: TState;
+};
+```
+
+---
+
 ### `Subscriber<TState>`
 
 A callback function that receives state updates.
 
-Subscribers are called immediately upon subscription with the current state, and subsequently whenever the state changes.
+Subscribers are called immediately upon subscription with `{ current, previous: undefined }`, and subsequently whenever the state changes with `{ current, previous }`.
+
+Uses a single object parameter for Svelte store compatibility.
 
 ```typescript
-type Subscriber<TState> = (state: TState) => void;
+type Subscriber<TState> = (value: SubscriberValue<TState>) => void;
+```
+
+**Example:**
+
+```typescript
+actor.subscribe(({ current, previous }) => {
+  if (previous === undefined) {
+    // Initial subscription - no previous state
+    console.log("Initial state:", current);
+  } else {
+    // Subsequent updates - previous state available
+    console.log("Changed from", previous, "to", current);
+  }
+});
 ```
 
 ---

@@ -3,7 +3,7 @@
 // ============================================================================
 
 import { createPubSub, type PubSub } from "@marianmeres/pubsub";
-import { withNamespace, type Logger } from "@marianmeres/clog";
+import { createClog, withNamespace, type Logger } from "@marianmeres/clog";
 
 /**
  * A function that processes messages and returns a response.
@@ -349,7 +349,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 ): Actor<TState, TMessage, TResponse> {
 	const { initialState, handler, reducer, onError, logger } = options;
 
-	const clog = withNamespace(logger ?? console, "actor");
+	const clog = withNamespace(logger ?? createClog(), "actor");
 
 	let state = initialState;
 	let processing = false;

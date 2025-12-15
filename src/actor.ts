@@ -3,35 +3,7 @@
 // ============================================================================
 
 import { createPubSub, type PubSub } from "@marianmeres/pubsub";
-
-/**
- * Logger interface compatible with both console and @marianmeres/clog.
- *
- * When using a custom logger (like clog), it will be used for debug output.
- * When not provided, falls back to console.
- *
- * @example
- * ```typescript
- * import { createClog } from "@marianmeres/clog";
- *
- * const actor = createActor({
- *   initialState: 0,
- *   handler: (state, msg) => state + 1,
- *   debug: true,
- *   logger: createClog("my-actor"),
- * });
- * ```
- */
-export interface Logger {
-	// deno-lint-ignore no-explicit-any
-	debug: (...args: any[]) => any;
-	// deno-lint-ignore no-explicit-any
-	log: (...args: any[]) => any;
-	// deno-lint-ignore no-explicit-any
-	warn: (...args: any[]) => any;
-	// deno-lint-ignore no-explicit-any
-	error: (...args: any[]) => any;
-}
+import { withNamespace, type Logger } from "@marianmeres/clog";
 
 /**
  * A function that processes messages and returns a response.
@@ -228,16 +200,6 @@ export interface Actor<TState, TMessage, TResponse = void> {
 	destroy: () => void;
 
 	/**
-	 * The current debug flag value.
-	 *
-	 * Returns the debug setting passed to the actor options, or `undefined` if
-	 * not specified. Useful for inspecting whether debug logging is enabled.
-	 *
-	 * @readonly
-	 */
-	readonly debug: boolean | undefined;
-
-	/**
 	 * The logger instance used by this actor.
 	 *
 	 * Returns the custom logger if one was provided in options, otherwise
@@ -315,16 +277,6 @@ export interface ActorOptions<TState, TMessage, TResponse> {
 	onError?: (error: Error, message: TMessage) => void;
 
 	/**
-	 * Enable debug logging for this actor.
-	 *
-	 * When true, logs important actor lifecycle events and message processing
-	 * to the provided logger (or console if no logger specified).
-	 *
-	 * @default false
-	 */
-	debug?: boolean;
-
-	/**
 	 * Custom logger to use for logging output.
 	 *
 	 * Must implement the Logger interface (debug, log, warn, error methods).
@@ -337,7 +289,6 @@ export interface ActorOptions<TState, TMessage, TResponse> {
 	 * const actor = createActor({
 	 *   initialState: 0,
 	 *   handler: (state, msg) => state + 1,
-	 *   debug: true,
 	 *   logger: createClog("my-actor"),
 	 * });
 	 * ```
@@ -396,14 +347,9 @@ const STATE_CHANGE_TOPIC = "state";
 export function createActor<TState, TMessage, TResponse = void>(
 	options: ActorOptions<TState, TMessage, TResponse>
 ): Actor<TState, TMessage, TResponse> {
-	const { initialState, handler, reducer, onError, debug, logger } = options;
+	const { initialState, handler, reducer, onError, logger } = options;
 
-	// Debug logging helper - only logs when debug is enabled
-	const _logger = logger ?? console;
-	const _debugLog = debug
-		? // deno-lint-ignore no-explicit-any
-		  (...args: any[]) => _logger.debug("[actor]", ...args)
-		: () => {};
+	const clog = withNamespace(logger ?? console, "actor");
 
 	let state = initialState;
 	let processing = false;
@@ -411,7 +357,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 
 	const mailbox: QueuedMessage<TMessage, TResponse>[] = [];
 	const pubsub: PubSub = createPubSub({
-		onError: (e: Error) => _logger.error("[actor] Subscriber error:", e),
+		onError: (e: Error) => clog.error("Subscriber error:", e),
 	});
 
 	function notifySubscribers(previous: TState) {
@@ -426,9 +372,9 @@ export function createActor<TState, TMessage, TResponse = void>(
 			const { message, resolve, reject } = mailbox.shift()!;
 
 			try {
-				_debugLog("processing", message);
+				clog.debug("processing", message);
 				const response = await handler(state, message);
-				_debugLog("processed", response);
+				clog.debug("processed", response);
 
 				// Update state if reducer provided
 				if (reducer) {
@@ -436,7 +382,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 					if (newState !== state) {
 						const previous = state;
 						state = newState;
-						_debugLog("state changed", state);
+						clog.debug("state changed", state);
 						notifySubscribers(previous);
 					}
 				}
@@ -445,7 +391,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 			} catch (error) {
 				const err =
 					error instanceof Error ? error : new Error(String(error));
-				_logger.error("[actor] error", err.message);
+				clog.error("error", err.message);
 				onError?.(err, message);
 				reject(err);
 			}
@@ -454,7 +400,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 		processing = false;
 	}
 
-	_debugLog("created", initialState);
+	clog.debug("created", initialState);
 
 	return {
 		send(message: TMessage): Promise<TResponse> {
@@ -462,7 +408,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 				return Promise.reject(new Error("Actor has been destroyed"));
 			}
 
-			_debugLog("send", message);
+			clog.debug("send", message);
 
 			return new Promise((resolve, reject) => {
 				mailbox.push({ message, resolve, reject });
@@ -471,19 +417,19 @@ export function createActor<TState, TMessage, TResponse = void>(
 		},
 
 		subscribe(fn: Subscriber<TState>): Unsubscribe {
-			_debugLog("subscribed");
+			clog.debug("subscribed");
 			// pubsub already receives { current, previous } from notifySubscribers
 			const unsubscribe = pubsub.subscribe(STATE_CHANGE_TOPIC, fn);
 			try {
 				fn({ current: state, previous: undefined }); // Emit current state immediately
 			} catch (e) {
-				_logger.error(
-					"[actor] Subscriber error:",
+				clog.error(
+					"Subscriber error:",
 					e instanceof Error ? e : new Error(String(e))
 				);
 			}
 			return () => {
-				_debugLog("unsubscribed");
+				clog.debug("unsubscribed");
 				unsubscribe();
 			};
 		},
@@ -493,18 +439,14 @@ export function createActor<TState, TMessage, TResponse = void>(
 		},
 
 		destroy() {
-			_debugLog("destroyed");
+			clog.debug("destroyed");
 			destroyed = true;
 			mailbox.length = 0;
 			pubsub.unsubscribeAll();
 		},
 
 		get logger() {
-			return logger ?? console;
-		},
-
-		get debug() {
-			return debug;
+			return clog;
 		},
 	};
 }
@@ -524,7 +466,7 @@ export function createActor<TState, TMessage, TResponse = void>(
  *
  * @param initialState - The initial state
  * @param handler - Function that receives state and message, returns new state
- * @param options - Optional configuration for debug logging
+ * @param options - Optional configuration (logger)
  * @returns An Actor instance
  *
  * @example
@@ -555,24 +497,23 @@ export function createActor<TState, TMessage, TResponse = void>(
  *
  * @example
  * ```typescript
- * // With debug logging
+ * // With custom logger
  * const counter = createStateActor(
  *   0,
  *   (state, msg) => state + 1,
- *   { debug: true }
+ *   { logger: createClog("counter") }
  * );
  * ```
  */
 export function createStateActor<TState, TMessage>(
 	initialState: TState,
 	handler: (state: TState, message: TMessage) => TState | Promise<TState>,
-	options?: { debug?: boolean; logger?: Logger }
+	options?: { logger?: Logger }
 ): Actor<TState, TMessage, TState> {
 	return createActor({
 		initialState,
 		handler,
 		reducer: (_, newState) => newState,
-		debug: options?.debug,
 		logger: options?.logger,
 	});
 }

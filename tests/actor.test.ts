@@ -1,5 +1,9 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { createNoopClog } from "@marianmeres/clog";
 import { createActor, createStateActor, type Actor } from "../src/actor.ts";
+
+// Silent logger for tests
+const clog = createNoopClog("test");
 
 // ============================================================================
 // Test Helpers - Counter Actor
@@ -14,18 +18,22 @@ type CounterMessage =
 function createCounter(
 	initial: number = 0
 ): Actor<number, CounterMessage, number> {
-	return createStateActor<number, CounterMessage>(initial, (state, msg) => {
-		switch (msg.type) {
-			case "INCREMENT":
-				return state + 1;
-			case "DECREMENT":
-				return state - 1;
-			case "ADD":
-				return state + msg.payload;
-			case "RESET":
-				return 0;
-		}
-	});
+	return createStateActor<number, CounterMessage>(
+		initial,
+		(state, msg) => {
+			switch (msg.type) {
+				case "INCREMENT":
+					return state + 1;
+				case "DECREMENT":
+					return state - 1;
+				case "ADD":
+					return state + msg.payload;
+				case "RESET":
+					return 0;
+			}
+		},
+		{ logger: clog }
+	);
 }
 
 // ============================================================================
@@ -114,7 +122,8 @@ function createFormActor<T extends string>(
 				case "RESET":
 					return initialState;
 			}
-		}
+		},
+		{ logger: clog }
 	);
 }
 
@@ -127,6 +136,7 @@ Deno.test("processes messages and returns responses", async () => {
 		initialState: 0,
 		handler: (state, msg) => state + msg.value,
 		reducer: (_, response) => response,
+		logger: clog,
 	});
 
 	const result = await actor.send({ type: "ADD", value: 5 });
@@ -143,6 +153,7 @@ Deno.test("processes messages in order (FIFO)", async () => {
 			await new Promise((r) => setTimeout(r, 10 - msg)); // Shorter delay for higher numbers
 			order.push(msg);
 		},
+		logger: clog,
 	});
 
 	await Promise.all([actor.send(1), actor.send(2), actor.send(3)]);
@@ -157,6 +168,7 @@ Deno.test("handles async handlers", async () => {
 			return state + msg;
 		},
 		reducer: (_, response) => response,
+		logger: clog,
 	});
 
 	await actor.send("hello");
@@ -172,7 +184,8 @@ Deno.test("handles async handlers", async () => {
 Deno.test("notifies subscribers of state changes", async () => {
 	const actor = createStateActor<number, { delta: number }>(
 		0,
-		(state, msg) => state + msg.delta
+		(state, msg) => state + msg.delta,
+		{ logger: clog }
 	);
 
 	const states: number[] = [];
@@ -187,7 +200,7 @@ Deno.test("notifies subscribers of state changes", async () => {
 });
 
 Deno.test("emits current state immediately on subscribe", () => {
-	const actor = createStateActor<number, never>(42, (s) => s);
+	const actor = createStateActor<number, never>(42, (s) => s, { logger: clog });
 
 	let received: number | null = null;
 	actor.subscribe(({ current }) => {
@@ -198,7 +211,9 @@ Deno.test("emits current state immediately on subscribe", () => {
 });
 
 Deno.test("allows unsubscribing", async () => {
-	const actor = createStateActor<number, number>(0, (_, msg) => msg);
+	const actor = createStateActor<number, number>(0, (_, msg) => msg, {
+		logger: clog,
+	});
 
 	const states: number[] = [];
 	const unsubscribe = actor.subscribe(({ current }) => states.push(current));
@@ -211,13 +226,20 @@ Deno.test("allows unsubscribing", async () => {
 });
 
 Deno.test("handles subscriber errors gracefully", async () => {
-	const originalError = console.error;
 	let errorCalled = false;
-	console.error = () => {
-		errorCalled = true;
+	const testLogger = {
+		debug: () => "",
+		log: () => "",
+		warn: () => "",
+		error: () => {
+			errorCalled = true;
+			return "";
+		},
 	};
 
-	const actor = createStateActor<number, number>(0, (_, msg) => msg);
+	const actor = createStateActor<number, number>(0, (_, msg) => msg, {
+		logger: testLogger,
+	});
 
 	actor.subscribe(() => {
 		throw new Error("Subscriber error");
@@ -227,14 +249,13 @@ Deno.test("handles subscriber errors gracefully", async () => {
 	const result = await actor.send(1);
 	assertEquals(result, 1);
 	assertEquals(errorCalled, true);
-
-	console.error = originalError;
 });
 
 Deno.test("provides previous state to subscribers", async () => {
 	const actor = createStateActor<number, { delta: number }>(
 		0,
-		(state, msg) => state + msg.delta
+		(state, msg) => state + msg.delta,
+		{ logger: clog }
 	);
 
 	const history: Array<{ current: number; previous: number | undefined }> = [];
@@ -255,7 +276,7 @@ Deno.test("provides previous state to subscribers", async () => {
 });
 
 Deno.test("previous state is undefined on initial subscription", () => {
-	const actor = createStateActor<number, never>(42, (s) => s);
+	const actor = createStateActor<number, never>(42, (s) => s, { logger: clog });
 
 	let receivedPrevious: number | undefined = "not-set" as unknown as undefined;
 	actor.subscribe(({ previous }) => {
@@ -274,14 +295,18 @@ Deno.test("previous state allows detecting specific changes", async () => {
 	const actor = createStateActor<
 		AppState,
 		{ type: "INC" } | { type: "SET_NAME"; name: string }
-	>({ count: 0, name: "" }, (state, msg) => {
-		switch (msg.type) {
-			case "INC":
-				return { ...state, count: state.count + 1 };
-			case "SET_NAME":
-				return { ...state, name: msg.name };
-		}
-	});
+	>(
+		{ count: 0, name: "" },
+		(state, msg) => {
+			switch (msg.type) {
+				case "INC":
+					return { ...state, count: state.count + 1 };
+				case "SET_NAME":
+					return { ...state, name: msg.name };
+			}
+		},
+		{ logger: clog }
+	);
 
 	const countChanges: Array<{ from: number | undefined; to: number }> = [];
 	const nameChanges: Array<{ from: string | undefined; to: string }> = [];
@@ -315,6 +340,7 @@ Deno.test("does not notify when state reference unchanged", async () => {
 		initialState: { count: 0 },
 		handler: () => {}, // Does nothing, state unchanged
 		reducer: (state) => state, // Returns same reference
+		logger: clog,
 	});
 
 	const calls: number[] = [];
@@ -337,6 +363,7 @@ Deno.test("rejects promise when handler throws", async () => {
 		handler: () => {
 			throw new Error("Handler error");
 		},
+		logger: clog,
 	});
 
 	await assertRejects(() => actor.send("test"), Error, "Handler error");
@@ -355,6 +382,7 @@ Deno.test("calls onError callback when handler throws", async () => {
 			errorReceived = error;
 			messageReceived = message;
 		},
+		logger: clog,
 	});
 
 	await assertRejects(() => actor.send("test"), Error);
@@ -373,6 +401,7 @@ Deno.test("continues processing after error", async () => {
 			return state + 1;
 		},
 		reducer: (_, response) => response,
+		logger: clog,
 	});
 
 	await assertRejects(() => actor.send("fail"), Error);
@@ -386,7 +415,9 @@ Deno.test("continues processing after error", async () => {
 // ============================================================================
 
 Deno.test("rejects new messages after destroy", async () => {
-	const actor = createStateActor<number, number>(0, (_, msg) => msg);
+	const actor = createStateActor<number, number>(0, (_, msg) => msg, {
+		logger: clog,
+	});
 
 	actor.destroy();
 
@@ -398,7 +429,9 @@ Deno.test("rejects new messages after destroy", async () => {
 });
 
 Deno.test("clears subscribers on destroy", () => {
-	const actor = createStateActor<number, number>(0, (_, msg) => msg);
+	const actor = createStateActor<number, number>(0, (_, msg) => msg, {
+		logger: clog,
+	});
 
 	let callCount = 0;
 	actor.subscribe(() => {
@@ -597,6 +630,7 @@ Deno.test("serializes concurrent sends", async () => {
 			await new Promise((r) => setTimeout(r, 10));
 			events.push(`end:${msg}`);
 		},
+		logger: clog,
 	});
 
 	await Promise.all([actor.send("A"), actor.send("B"), actor.send("C")]);
@@ -644,12 +678,16 @@ type CounterSchemas = {
 };
 
 Deno.test("basic message handling", async () => {
-	const counter = createTypedStateActor<CounterSchemas, number>(0, {
-		INC: (_, state) => state + 1,
-		DEC: (_, state) => state - 1,
-		ADD: (msg, state) => state + msg.amount,
-		RESET: () => 0,
-	});
+	const counter = createTypedStateActor<CounterSchemas, number>(
+		0,
+		{
+			INC: (_, state) => state + 1,
+			DEC: (_, state) => state - 1,
+			ADD: (msg, state) => state + msg.amount,
+			RESET: () => 0,
+		},
+		{ logger: clog }
+	);
 
 	await counter.send({ type: "INC" });
 	assertEquals(counter.getState(), 1);
@@ -670,13 +708,17 @@ Deno.test("async handlers", async () => {
 		SET: { type: "SET"; value: string };
 	};
 
-	const actor = createTypedStateActor<AsyncSchemas, string>("initial", {
-		FETCH: async (msg, _state) => {
-			await new Promise((r) => setTimeout(r, msg.delay));
-			return "fetched";
+	const actor = createTypedStateActor<AsyncSchemas, string>(
+		"initial",
+		{
+			FETCH: async (msg, _state) => {
+				await new Promise((r) => setTimeout(r, msg.delay));
+				return "fetched";
+			},
+			SET: (msg, _state) => msg.value,
 		},
-		SET: (msg, _state) => msg.value,
-	});
+		{ logger: clog }
+	);
 
 	await actor.send({ type: "FETCH", delay: 5 });
 	assertEquals(actor.getState(), "fetched");
@@ -686,12 +728,16 @@ Deno.test("async handlers", async () => {
 });
 
 Deno.test("subscriptions work", async () => {
-	const counter = createTypedStateActor<CounterSchemas, number>(0, {
-		INC: (_, state) => state + 1,
-		DEC: (_, state) => state - 1,
-		ADD: (msg, state) => state + msg.amount,
-		RESET: () => 0,
-	});
+	const counter = createTypedStateActor<CounterSchemas, number>(
+		0,
+		{
+			INC: (_, state) => state + 1,
+			DEC: (_, state) => state - 1,
+			ADD: (msg, state) => state + msg.amount,
+			RESET: () => 0,
+		},
+		{ logger: clog }
+	);
 
 	const values: number[] = [];
 	counter.subscribe(({ current }) => values.push(current));
@@ -712,23 +758,27 @@ Deno.test("each handler receives correctly typed message", async () => {
 
 	const results: string[] = [];
 
-	const actor = createTypedStateActor<TestSchemas, null>(null, {
-		STRING_MSG: (msg, state) => {
-			// msg.text is typed as string
-			results.push(`string: ${msg.text}`);
-			return state;
+	const actor = createTypedStateActor<TestSchemas, null>(
+		null,
+		{
+			STRING_MSG: (msg, state) => {
+				// msg.text is typed as string
+				results.push(`string: ${msg.text}`);
+				return state;
+			},
+			NUMBER_MSG: (msg, state) => {
+				// msg.value is typed as number
+				results.push(`number: ${msg.value}`);
+				return state;
+			},
+			COMPLEX_MSG: (msg, state) => {
+				// msg.data.nested is typed as boolean
+				results.push(`complex: ${msg.data.nested}`);
+				return state;
+			},
 		},
-		NUMBER_MSG: (msg, state) => {
-			// msg.value is typed as number
-			results.push(`number: ${msg.value}`);
-			return state;
-		},
-		COMPLEX_MSG: (msg, state) => {
-			// msg.data.nested is typed as boolean
-			results.push(`complex: ${msg.data.nested}`);
-			return state;
-		},
-	});
+		{ logger: clog }
+	);
 
 	await actor.send({ type: "STRING_MSG", text: "hello" });
 	await actor.send({ type: "NUMBER_MSG", value: 42 });
@@ -742,12 +792,16 @@ Deno.test("FIFO message ordering preserved", async () => {
 		APPEND: { type: "APPEND"; value: string };
 	};
 
-	const actor = createTypedStateActor<OrderSchemas, string[]>([], {
-		APPEND: async (msg, state) => {
-			await new Promise((r) => setTimeout(r, Math.random() * 10));
-			return [...state, msg.value];
+	const actor = createTypedStateActor<OrderSchemas, string[]>(
+		[],
+		{
+			APPEND: async (msg, state) => {
+				await new Promise((r) => setTimeout(r, Math.random() * 10));
+				return [...state, msg.value];
+			},
 		},
-	});
+		{ logger: clog }
+	);
 
 	await Promise.all([
 		actor.send({ type: "APPEND", value: "A" }),
@@ -759,12 +813,16 @@ Deno.test("FIFO message ordering preserved", async () => {
 });
 
 Deno.test("destroy works", async () => {
-	const counter = createTypedStateActor<CounterSchemas, number>(0, {
-		INC: (_, state) => state + 1,
-		DEC: (_, state) => state - 1,
-		ADD: (msg, state) => state + msg.amount,
-		RESET: () => 0,
-	});
+	const counter = createTypedStateActor<CounterSchemas, number>(
+		0,
+		{
+			INC: (_, state) => state + 1,
+			DEC: (_, state) => state - 1,
+			ADD: (msg, state) => state + msg.amount,
+			RESET: () => 0,
+		},
+		{ logger: clog }
+	);
 
 	await counter.send({ type: "INC" });
 	counter.destroy();
@@ -824,6 +882,7 @@ Deno.test("with reducer for rich responses", async () => {
 			lastResult: response.output,
 			processCount: state.processCount + 1,
 		}),
+		logger: clog,
 	});
 
 	const response = await actor.send({ type: "PROCESS", input: "hello" });
@@ -854,6 +913,7 @@ Deno.test("onError callback", async () => {
 		onError: (error, message) => {
 			errors.push({ error, message });
 		},
+		logger: clog,
 	});
 
 	await assertRejects(
@@ -919,7 +979,7 @@ Deno.test("getId extracts discriminator", () => {
 // Debug Logging Tests
 // ============================================================================
 
-Deno.test("uses custom logger when debug enabled", async () => {
+Deno.test("uses custom logger", async () => {
 	const logs: string[] = [];
 	const customLogger = {
 		// deno-lint-ignore no-explicit-any
@@ -947,7 +1007,7 @@ Deno.test("uses custom logger when debug enabled", async () => {
 	const counter = createStateActor<number, { type: "INC" }>(
 		0,
 		(state, _) => state + 1,
-		{ debug: true, logger: customLogger }
+		{ logger: customLogger }
 	);
 
 	await counter.send({ type: "INC" });
@@ -980,43 +1040,6 @@ Deno.test("uses custom logger when debug enabled", async () => {
 	);
 });
 
-Deno.test("no logging when debug is false", async () => {
-	const logs: string[] = [];
-	const customLogger = {
-		// deno-lint-ignore no-explicit-any
-		debug: (...args: any[]) => {
-			logs.push(`debug: ${args.join(" ")}`);
-			return "";
-		},
-		// deno-lint-ignore no-explicit-any
-		log: (...args: any[]) => {
-			logs.push(`log: ${args.join(" ")}`);
-			return "";
-		},
-		// deno-lint-ignore no-explicit-any
-		warn: (...args: any[]) => {
-			logs.push(`warn: ${args.join(" ")}`);
-			return "";
-		},
-		// deno-lint-ignore no-explicit-any
-		error: (...args: any[]) => {
-			logs.push(`error: ${args.join(" ")}`);
-			return "";
-		},
-	};
-
-	const counter = createStateActor<number, { type: "INC" }>(
-		0,
-		(state, _) => state + 1,
-		{ debug: false, logger: customLogger }
-	);
-
-	await counter.send({ type: "INC" });
-	counter.destroy();
-
-	assertEquals(logs.length, 0);
-});
-
 Deno.test("logs subscription and unsubscription", () => {
 	const logs: string[] = [];
 	const customLogger = {
@@ -1045,7 +1068,7 @@ Deno.test("logs subscription and unsubscription", () => {
 	const counter = createStateActor<number, { type: "INC" }>(
 		0,
 		(state, _) => state + 1,
-		{ debug: true, logger: customLogger }
+		{ logger: customLogger }
 	);
 
 	const unsubscribe = counter.subscribe(() => {});
@@ -1093,7 +1116,6 @@ Deno.test("logs errors", async () => {
 		handler: () => {
 			throw new Error("Test error");
 		},
-		debug: true,
 		logger: customLogger,
 	});
 
@@ -1144,7 +1166,7 @@ Deno.test("works with createTypedStateActor", async () => {
 			ADD: (msg, state) => state + msg.amount,
 			RESET: () => 0,
 		},
-		{ debug: true, logger: customLogger }
+		{ logger: customLogger }
 	);
 
 	await counter.send({ type: "INC" });
@@ -1195,7 +1217,6 @@ Deno.test("works with createTypedActor", async () => {
 			PROCESS: (msg, state) => state + msg.value,
 		},
 		reducer: (_, response) => response,
-		debug: true,
 		logger: customLogger,
 	});
 

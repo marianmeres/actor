@@ -11,12 +11,8 @@
 // ============================================================================
 
 import { createDtoFactory, type DtoFactory } from "@marianmeres/dtokit";
-import {
-	createActor,
-	createStateActor,
-	type Actor,
-	type Logger,
-} from "./actor.ts";
+import type { Logger } from "@marianmeres/clog";
+import { createActor, createStateActor, type Actor } from "./actor.ts";
 
 /**
  * A schema object where each key maps to a message type with a literal discriminator.
@@ -66,7 +62,7 @@ export type MessageUnion<TSchemas extends MessageSchemas> =
 export type ExhaustiveHandlers<
 	TSchemas extends MessageSchemas,
 	TState,
-	TResult,
+	TResult
 > = {
 	[K in keyof TSchemas]: (
 		msg: TSchemas[K],
@@ -173,18 +169,18 @@ export type ExhaustiveHandlers<
  *
  * @example
  * ```typescript
- * // With debug logging
+ * // With custom logger
  * const counter = createTypedStateActor<Schemas, number>(
  *   0,
  *   { INC: (_, s) => s + 1, DEC: (_, s) => s - 1 },
- *   { debug: true }
+ *   { logger: createClog("counter") }
  * );
  * ```
  */
 export function createTypedStateActor<TSchemas extends MessageSchemas, TState>(
 	initialState: TState,
 	handlers: ExhaustiveHandlers<TSchemas, TState, TState>,
-	options?: { debug?: boolean; logger?: Logger }
+	options?: { logger?: Logger }
 ): Actor<TState, MessageUnion<TSchemas>, TState> {
 	return createStateActor<TState, MessageUnion<TSchemas>>(
 		initialState,
@@ -207,7 +203,7 @@ export function createTypedStateActor<TSchemas extends MessageSchemas, TState>(
 export interface TypedActorOptions<
 	TSchemas extends MessageSchemas,
 	TState,
-	TResponse,
+	TResponse
 > {
 	/**
 	 * The initial state of the actor.
@@ -233,16 +229,6 @@ export interface TypedActorOptions<
 	 * Optional error handler called when a message handler throws.
 	 */
 	onError?: (error: Error, message: MessageUnion<TSchemas>) => void;
-
-	/**
-	 * Enable debug logging for this actor.
-	 *
-	 * When true, logs important actor lifecycle events and message processing
-	 * to the provided logger (or console if no logger specified).
-	 *
-	 * @default false
-	 */
-	debug?: boolean;
 
 	/**
 	 * Custom logger to use for debug output.
@@ -302,11 +288,11 @@ export interface TypedActorOptions<
 export function createTypedActor<
 	TSchemas extends MessageSchemas,
 	TState,
-	TResponse,
+	TResponse
 >(
 	options: TypedActorOptions<TSchemas, TState, TResponse>
 ): Actor<TState, MessageUnion<TSchemas>, TResponse> {
-	const { initialState, handlers, reducer, onError, debug, logger } = options;
+	const { initialState, handlers, reducer, onError, logger } = options;
 
 	return createActor<TState, MessageUnion<TSchemas>, TResponse>({
 		initialState,
@@ -317,7 +303,6 @@ export function createTypedActor<
 		},
 		reducer,
 		onError,
-		debug,
 		logger,
 	});
 }
@@ -351,7 +336,7 @@ export function createTypedActor<
  * ```
  */
 export function createMessageFactory<
-	TSchemas extends MessageSchemas,
+	TSchemas extends MessageSchemas
 >(): DtoFactory<TSchemas, "type"> {
 	return createDtoFactory<TSchemas>()("type");
 }

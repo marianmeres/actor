@@ -1019,19 +1019,19 @@ Deno.test("uses custom logger", async () => {
 		true
 	);
 	assertEquals(
-		logs.some((l) => l.includes("send")),
+		logs.some((l) => l.includes("Sending message")),
 		true
 	);
 	assertEquals(
-		logs.some((l) => l.includes("processing")),
+		logs.some((l) => l.includes("Processing message")),
 		true
 	);
 	assertEquals(
-		logs.some((l) => l.includes("processed")),
+		logs.some((l) => l.includes("Message processed")),
 		true
 	);
 	assertEquals(
-		logs.some((l) => l.includes("state changed")),
+		logs.some((l) => l.includes("State changed")),
 		true
 	);
 	assertEquals(
@@ -1075,11 +1075,11 @@ Deno.test("logs subscription and unsubscription", () => {
 	unsubscribe();
 
 	assertEquals(
-		logs.some((l) => l.includes("subscribed")),
+		logs.some((l) => l.includes("Subscriber added")),
 		true
 	);
 	assertEquals(
-		logs.some((l) => l.includes("unsubscribed")),
+		logs.some((l) => l.includes("Subscriber removed")),
 		true
 	);
 
@@ -1173,11 +1173,11 @@ Deno.test("works with createTypedStateActor", async () => {
 	counter.destroy();
 
 	assertEquals(
-		logs.some((l) => l.includes("created")),
+		logs.some((l) => l.includes("Actor created")),
 		true
 	);
 	assertEquals(
-		logs.some((l) => l.includes("send")),
+		logs.some((l) => l.includes("Sending message")),
 		true
 	);
 });
@@ -1224,11 +1224,11 @@ Deno.test("works with createTypedActor", async () => {
 	actor.destroy();
 
 	assertEquals(
-		logs.some((l) => l.includes("created")),
+		logs.some((l) => l.includes("Actor created")),
 		true
 	);
 	assertEquals(
-		logs.some((l) => l.includes("send")),
+		logs.some((l) => l.includes("Sending message")),
 		true
 	);
 });

@@ -357,7 +357,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 
 	const mailbox: QueuedMessage<TMessage, TResponse>[] = [];
 	const pubsub: PubSub = createPubSub({
-		onError: (e: Error) => clog.error("Subscriber error:", e),
+		onError: (e: Error) => clog.error("Subscriber threw an error.", e),
 	});
 
 	function notifySubscribers(previous: TState) {
@@ -372,9 +372,9 @@ export function createActor<TState, TMessage, TResponse = void>(
 			const { message, resolve, reject } = mailbox.shift()!;
 
 			try {
-				clog.debug("processing", message);
+				clog.debug("Processing message.", message);
 				const response = await handler(state, message);
-				clog.debug("processed", response);
+				clog.debug("Message processed.", response);
 
 				// Update state if reducer provided
 				if (reducer) {
@@ -382,7 +382,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 					if (newState !== state) {
 						const previous = state;
 						state = newState;
-						clog.debug("state changed", state);
+						clog.debug("State changed.", state);
 						notifySubscribers(previous);
 					}
 				}
@@ -391,7 +391,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 			} catch (error) {
 				const err =
 					error instanceof Error ? error : new Error(String(error));
-				clog.error("error", err.message);
+				clog.error(`Handler threw an error: ${err.message}`);
 				onError?.(err, message);
 				reject(err);
 			}
@@ -400,7 +400,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 		processing = false;
 	}
 
-	clog.debug("created", initialState);
+	clog.debug("Actor created.", initialState);
 
 	return {
 		send(message: TMessage): Promise<TResponse> {
@@ -408,7 +408,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 				return Promise.reject(new Error("Actor has been destroyed"));
 			}
 
-			clog.debug("send", message);
+			clog.debug("Sending message.", message);
 
 			return new Promise((resolve, reject) => {
 				mailbox.push({ message, resolve, reject });
@@ -417,19 +417,19 @@ export function createActor<TState, TMessage, TResponse = void>(
 		},
 
 		subscribe(fn: Subscriber<TState>): Unsubscribe {
-			clog.debug("subscribed");
+			clog.debug("Subscriber added.");
 			// pubsub already receives { current, previous } from notifySubscribers
 			const unsubscribe = pubsub.subscribe(STATE_CHANGE_TOPIC, fn);
 			try {
 				fn({ current: state, previous: undefined }); // Emit current state immediately
 			} catch (e) {
 				clog.error(
-					"Subscriber error:",
+					"Subscriber threw an error.",
 					e instanceof Error ? e : new Error(String(e))
 				);
 			}
 			return () => {
-				clog.debug("unsubscribed");
+				clog.debug("Subscriber removed.");
 				unsubscribe();
 			};
 		},
@@ -439,7 +439,7 @@ export function createActor<TState, TMessage, TResponse = void>(
 		},
 
 		destroy() {
-			clog.debug("destroyed");
+			clog.debug("Actor destroyed.");
 			destroyed = true;
 			mailbox.length = 0;
 			pubsub.unsubscribeAll();

@@ -3,7 +3,7 @@
 ## Package Identity
 
 - **Name**: `@marianmeres/actor`
-- **Version**: 1.1.0
+- **Version**: 1.5.6
 - **Type**: Library
 - **Runtime**: Deno, Node.js, Browser
 - **Language**: TypeScript
@@ -41,11 +41,11 @@ send(message) -> mailbox.enqueue -> processMailbox -> handler(state, message) ->
 ```
 src/
 ├── mod.ts           # Entry point, re-exports from actor.ts and with-dtokit.ts
-├── actor.ts         # Core implementation (~490 lines)
-└── with-dtokit.ts   # DTOKit integration for exhaustive handlers (~320 lines)
+├── actor.ts         # Core implementation (~590 lines)
+└── with-dtokit.ts   # DTOKit integration for exhaustive handlers (~345 lines)
 
 tests/
-└── actor.test.ts    # Test suite (~815 lines, 38 tests)
+└── actor.test.ts    # Test suite (~1234 lines, 47 tests)
 
 scripts/
 └── build-npm.ts     # NPM build script
@@ -69,11 +69,11 @@ scripts/
 
 #### `createStateActor<TState, TMessage>(initialState, handler, options?)`
 - **Purpose**: Simplified actor where handler returns new state directly
-- **Location**: `src/actor.ts:500-512`
+- **Location**: `src/actor.ts:508-519`
 - **Parameters**:
   - `initialState: TState` - Initial state
   - `handler: (state, message) => TState | Promise<TState>` - State transformer
-  - `options?: { debug?: boolean; logger?: Logger }` - Optional debug logging configuration
+  - `options?: { logger?: Logger }` - Optional logging configuration
 - **Returns**: `Actor<TState, TMessage, TState>`
 
 #### `defineMessage<TType, TPayload?>(type)`
@@ -87,11 +87,11 @@ scripts/
 
 #### `createTypedStateActor<TSchemas, TState>(initialState, handlers, options?)`
 - **Purpose**: State actor with compile-time exhaustive message handling
-- **Location**: `src/with-dtokit.ts:184-198`
+- **Location**: `src/with-dtokit.ts:180-194`
 - **Parameters**:
   - `initialState: TState` - Initial state
   - `handlers: ExhaustiveHandlers<TSchemas, TState, TState>` - Handler for each message type
-  - `options?: { debug?: boolean; logger?: Logger }` - Optional debug logging configuration
+  - `options?: { logger?: Logger }` - Optional logging configuration
 - **Returns**: `Actor<TState, MessageUnion<TSchemas>, TState>`
 - **Key benefit**: TypeScript errors if any message type handler is missing
 
@@ -209,8 +209,9 @@ interface TypedActorOptions<TSchemas extends MessageSchemas, TState, TResponse> 
 ## Dependencies
 
 ### Runtime
-- `@marianmeres/pubsub` (^2.4.4) - Internal subscription management
-- `@marianmeres/dtokit` (^1.0.4) - Exhaustive type checking for typed actors
+- `@marianmeres/pubsub` (^2.4.6) - Internal subscription management
+- `@marianmeres/dtokit` (^1.0.6) - Exhaustive type checking for typed actors
+- `@marianmeres/clog` (^3.15.2) - Logging
 
 ### Development
 - `@marianmeres/npmbuild` - NPM build tooling
@@ -308,7 +309,7 @@ socket.onmessage = (event) => {
 
 ## Testing
 
-- 47 tests covering all functionality
+- 47 tests covering all public API functionality
 - Test categories: Core, Subscriptions (including previous state), Error Handling, Destroy, Counter Example, Form Example, Concurrency, DTOKit Integration, Debug Logging
 - Uses Deno's native test framework
 

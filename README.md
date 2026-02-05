@@ -77,7 +77,7 @@ For complete API documentation, see [API.md](API.md).
 | `createTypedActor(options)` | Full control + exhaustive handlers + reducer + debug logging |
 | `createMessageFactory()` | DTOKit factory for validating external messages |
 
-All actor factories support optional `debug: true` and custom `logger` for verbose debug logging.
+`createActor` and `createTypedActor` support optional `debug: true` and custom `logger` for verbose debug logging.
 
 | Actor Method | Description |
 |--------------|-------------|

@@ -100,7 +100,7 @@ This is a convenience wrapper around `createActor` for the common case where the
 function createStateActor<TState, TMessage>(
   initialState: TState,
   handler: (state: TState, message: TMessage) => TState | Promise<TState>,
-  options?: { debug?: boolean; logger?: Logger }
+  options?: { logger?: Logger }
 ): Actor<TState, TMessage, TState>
 ```
 
@@ -117,7 +117,7 @@ function createStateActor<TState, TMessage>(
 |------|------|-------------|
 | `initialState` | `TState` | The initial state |
 | `handler` | `(state: TState, message: TMessage) => TState \| Promise<TState>` | Function that receives state and message, returns new state |
-| `options` | `{ debug?: boolean; logger?: Logger }` | Optional configuration for debug logging |
+| `options` | `{ logger?: Logger }` | Optional logging configuration |
 
 **Returns:** `Actor<TState, TMessage, TState>`
 
@@ -220,7 +220,7 @@ This is the recommended way to create actors when you have multiple message type
 function createTypedStateActor<TSchemas extends MessageSchemas, TState>(
   initialState: TState,
   handlers: ExhaustiveHandlers<TSchemas, TState, TState>,
-  options?: { debug?: boolean; logger?: Logger }
+  options?: { logger?: Logger }
 ): Actor<TState, MessageUnion<TSchemas>, TState>
 ```
 
@@ -237,7 +237,7 @@ function createTypedStateActor<TSchemas extends MessageSchemas, TState>(
 |------|------|-------------|
 | `initialState` | `TState` | The initial state of the actor |
 | `handlers` | `ExhaustiveHandlers<TSchemas, TState, TState>` | Object with handler for each message type (exhaustive) |
-| `options` | `{ debug?: boolean; logger?: Logger }` | Optional configuration for debug logging |
+| `options` | `{ logger?: Logger }` | Optional logging configuration |
 
 **Returns:** `Actor<TState, MessageUnion<TSchemas>, TState>`
 

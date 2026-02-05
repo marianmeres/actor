@@ -1,6 +1,6 @@
 {
   "name": "@marianmeres/actor",
-  "version": "1.5.6",
+  "version": "1.5.7",
   "exports": "./src/mod.ts",
   "tasks": {
     "test": "deno test",

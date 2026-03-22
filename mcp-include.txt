@@ -1,1 +1,3 @@
-Actor Model pattern for TypeScript/JavaScript. Provides message-driven stateful computation with sequential mailbox processing, supporting both simple state actors and DTOKit-based typed actors with compile-time exhaustive message handling.
+Actor Model pattern for TypeScript/JavaScript. Provides message-driven stateful computation 
+with sequential mailbox processing, supporting both simple state actors and DTOKit-based 
+typed actors with compile-time exhaustive message handling.

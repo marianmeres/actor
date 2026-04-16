@@ -410,6 +410,29 @@ Deno.test("continues processing after error", async () => {
 	assertEquals(callCount, 2);
 });
 
+Deno.test("createStateActor forwards onError", async () => {
+	let errorReceived: Error | null = null;
+	let messageReceived: { type: "FAIL" } | null = null;
+
+	const actor = createStateActor<number, { type: "FAIL" }>(
+		0,
+		() => {
+			throw new Error("boom");
+		},
+		{
+			logger: clog,
+			onError: (error, message) => {
+				errorReceived = error;
+				messageReceived = message;
+			},
+		}
+	);
+
+	await assertRejects(() => actor.send({ type: "FAIL" }), Error, "boom");
+	assertEquals(errorReceived !== null, true);
+	assertEquals(messageReceived, { type: "FAIL" });
+});
+
 // ============================================================================
 // Destroy Tests
 // ============================================================================
@@ -447,6 +470,52 @@ Deno.test("clears subscribers on destroy", () => {
 	assertEquals(actor.getState(), 0);
 	// Subscriber was cleared (callCount not incremented during destroy)
 	assertEquals(callCount, 0);
+});
+
+Deno.test("destroy rejects pending sends", async () => {
+	const actor = createStateActor<number, number>(
+		0,
+		async (_, msg) => {
+			await new Promise((r) => setTimeout(r, 20));
+			return msg;
+		},
+		{ logger: clog }
+	);
+
+	const inFlight = actor.send(1);
+	const queued1 = actor.send(2);
+	const queued2 = actor.send(3);
+
+	actor.destroy();
+
+	const results = await Promise.allSettled([inFlight, queued1, queued2]);
+
+	// The queued sends must reject; the in-flight one may either resolve
+	// (handler already running) or reject depending on timing — both are acceptable.
+	assertEquals(results[1].status, "rejected");
+	assertEquals(results[2].status, "rejected");
+	if (results[1].status === "rejected") {
+		assertEquals(
+			(results[1].reason as Error).message,
+			"Actor has been destroyed"
+		);
+	}
+	if (results[2].status === "rejected") {
+		assertEquals(
+			(results[2].reason as Error).message,
+			"Actor has been destroyed"
+		);
+	}
+});
+
+Deno.test("destroy with empty mailbox is a no-op", () => {
+	const actor = createStateActor<number, number>(0, (_, msg) => msg, {
+		logger: clog,
+	});
+
+	// Should not throw even though mailbox is empty and no subscribers exist
+	actor.destroy();
+	assertEquals(actor.getState(), 0);
 });
 
 // ============================================================================

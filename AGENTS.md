@@ -63,17 +63,16 @@ scripts/
   - `options.handler: (state, message) => TResponse | Promise<TResponse>` - Message processor
   - `options.reducer?: (state, response) => TState` - State transformer
   - `options.onError?: (error, message) => void` - Error callback
-  - `options.debug?: boolean` - Enable debug logging (default: false)
   - `options.logger?: Logger` - Custom logger (falls back to console)
 - **Returns**: `Actor<TState, TMessage, TResponse>`
 
 #### `createStateActor<TState, TMessage>(initialState, handler, options?)`
 - **Purpose**: Simplified actor where handler returns new state directly
-- **Location**: `src/actor.ts:508-519`
+- **Location**: `src/actor.ts:508-522`
 - **Parameters**:
   - `initialState: TState` - Initial state
   - `handler: (state, message) => TState | Promise<TState>` - State transformer
-  - `options?: { logger?: Logger }` - Optional logging configuration
+  - `options?: { logger?: Logger; onError?: (error, message) => void }` - Optional configuration
 - **Returns**: `Actor<TState, TMessage, TState>`
 
 #### `defineMessage<TType, TPayload?>(type)`
@@ -103,7 +102,6 @@ scripts/
   - `options.handlers: ExhaustiveHandlers<TSchemas, TState, TResponse>`
   - `options.reducer?: (state, response) => TState`
   - `options.onError?: (error, message) => void`
-  - `options.debug?: boolean` - Enable debug logging (default: false)
   - `options.logger?: Logger` - Custom logger (falls back to console)
 - **Returns**: `Actor<TState, MessageUnion<TSchemas>, TResponse>`
 
@@ -132,11 +130,7 @@ scripts/
 
 #### `destroy(): void`
 - **Purpose**: Cleanup actor resources
-- **Behavior**: Clears mailbox, removes subscribers, rejects future sends
-
-#### `debug: boolean | undefined` (readonly)
-- **Purpose**: Access the debug flag value
-- **Behavior**: Returns the debug setting from options, or `undefined` if not specified
+- **Behavior**: Rejects all queued sends with "Actor has been destroyed", removes subscribers, rejects future sends
 
 #### `logger: Logger` (readonly)
 - **Purpose**: Access the logger instance
@@ -170,7 +164,6 @@ interface Actor<TState, TMessage, TResponse = void> {
   subscribe: (fn: Subscriber<TState>) => Unsubscribe;
   getState: () => TState;
   destroy: () => void;
-  readonly debug: boolean | undefined;
   readonly logger: Logger;
 }
 
@@ -179,7 +172,6 @@ interface ActorOptions<TState, TMessage, TResponse> {
   handler: MessageHandler<TState, TMessage, TResponse>;
   reducer?: StateReducer<TState, TResponse>;
   onError?: (error: Error, message: TMessage) => void;
-  debug?: boolean;
   logger?: Logger;
 }
 
@@ -201,7 +193,6 @@ interface TypedActorOptions<TSchemas extends MessageSchemas, TState, TResponse> 
   handlers: ExhaustiveHandlers<TSchemas, TState, TResponse>;
   reducer?: (state: TState, response: TResponse) => TState;
   onError?: (error: Error, message: MessageUnion<TSchemas>) => void;
-  debug?: boolean;
   logger?: Logger;
 }
 ```
@@ -305,12 +296,12 @@ socket.onmessage = (event) => {
 6. **Graceful Destruction**: destroy() clears mailbox and rejects pending sends
 7. **Async Support**: Handlers can be sync or async (Promise-returning)
 8. **Exhaustive Handling**: Typed actors enforce handlers for all message types at compile-time
-9. **Debug Logging**: Optional `debug` flag enables verbose logging via custom `Logger` or console
+9. **Logging**: A custom `Logger` (clog-compatible) can be injected; all internal `debug/log/warn/error` output routes through it. Level filtering is the logger's concern.
 
 ## Testing
 
 - 47 tests covering all public API functionality
-- Test categories: Core, Subscriptions (including previous state), Error Handling, Destroy, Counter Example, Form Example, Concurrency, DTOKit Integration, Debug Logging
+- Test categories: Core, Subscriptions (including previous state), Error Handling, Destroy, Counter Example, Form Example, Concurrency, DTOKit Integration, Logging
 - Uses Deno's native test framework
 
 ## Design Philosophy

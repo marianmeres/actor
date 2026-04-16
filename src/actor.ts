@@ -441,7 +441,10 @@ export function createActor<TState, TMessage, TResponse = void>(
 		destroy() {
 			clog.debug("Actor destroyed.");
 			destroyed = true;
-			mailbox.length = 0;
+			while (mailbox.length > 0) {
+				const { reject } = mailbox.shift()!;
+				reject(new Error("Actor has been destroyed"));
+			}
 			pubsub.unsubscribeAll();
 		},
 
@@ -466,7 +469,7 @@ export function createActor<TState, TMessage, TResponse = void>(
  *
  * @param initialState - The initial state
  * @param handler - Function that receives state and message, returns new state
- * @param options - Optional configuration (logger)
+ * @param options - Optional configuration (logger, onError)
  * @returns An Actor instance
  *
  * @example
@@ -508,13 +511,17 @@ export function createActor<TState, TMessage, TResponse = void>(
 export function createStateActor<TState, TMessage>(
 	initialState: TState,
 	handler: (state: TState, message: TMessage) => TState | Promise<TState>,
-	options?: { logger?: Logger }
+	options?: {
+		logger?: Logger;
+		onError?: (error: Error, message: TMessage) => void;
+	}
 ): Actor<TState, TMessage, TState> {
 	return createActor({
 		initialState,
 		handler,
 		reducer: (_, newState) => newState,
 		logger: options?.logger,
+		onError: options?.onError,
 	});
 }
 
